@@ -534,14 +534,23 @@ pub fn u256_to_block_hash(v: U256<'static>) -> BlockHash {
 
 #[test]
 fn test_bip32_extended_to_compressed() {
-    let input = "vpub5XzEwP9YWe4cKKZAmbiBUxC7eL5HaZhbquBYzP3vDSDJJegb7CSCRphAPmwpGHzAyH1as9MRnXFWDcZozXA1K3sQqyKdTagooPfCVDhiwnr";
-    let expected_output = "02e3c73b75fa0949872c8479c3af2ec9f0d3631b1c606039035e8daf8ec6da9c34";
+    let input = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
     let result = bip32_extended_to_compressed(input).unwrap();
-    assert_eq!(result, expected_output);
+    let comparison_result = get_pubkey_from_base58check_bip32_extended(input).unwrap();
+    assert_eq!(result, comparison_result);
 
     let invalid_input = "invalid_extended_public_key";
     assert!(bip32_extended_to_compressed(invalid_input).is_err());
+
+    fn get_pubkey_from_base58check_bip32_extended (bip32_extended_public_key: &str) -> Result<String, Error> {
+        let decoded_base58_check = base58::from_check(bip32_extended_public_key).map_err(|_| Error::InvalidOutputScript)?;
+        let decoded_bip32_extended_pubkey = bitcoin::util::bip32::ExtendedPubKey::decode(&decoded_base58_check);
+        let compressed_pub_key = decoded_bip32_extended_pubkey.unwrap().to_pub();
+        Ok(compressed_pub_key.inner.to_string())
+    }
 }
+
+
 
 /// Returns a new `BlockHeader`.
 /// Expected endianness inputs:
