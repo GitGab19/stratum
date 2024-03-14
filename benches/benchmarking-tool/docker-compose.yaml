@@ -1,0 +1,241 @@
+version: '3'
+
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+    bitcoin_data: {}
+
+networks:
+  monitor-net:
+  sv2-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.5.0.0/24
+          gateway: 10.5.0.1
+
+services:
+  template-provider:
+    build:
+      dockerfile: ./template-provider.dockerfile
+    image: sv2-template-provider 
+    command: ["/bitcoin/src/bitcoind", "-testnet", "-sv2", "-sv2port=8442", "-sv2interval=10", "-sv2feedelta=100"]   
+    ports:
+      - "8442:8442"
+      - "8333:8333"
+      - "8332:8332"
+      - "18332:18332"
+    container_name: sv2-tp
+    volumes:
+      - bitcoin_data:/root/.bitcoin
+      - ./bitcoin.conf:/root/.bitcoin/bitcoin.conf
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.2
+
+  sv2-roles-builder:
+    build:
+      context: ../../roles
+      dockerfile: ../benches/benchmarking-tool/sri-roles.dockerfile
+    container_name: sv2-roles-builder
+    image: sv2-roles-builder-image  
+    command: echo "SRI build completed"  
+
+  #mining-proxy:
+    #build:
+      #context: .
+    #command: ["./mining-proxy", "-c", "path/to/mining-proxy/config-file.toml"]
+    #ports:
+      #- "8080:8080"  # Puoi personalizzare la porta esterna (8080) a tuo piacimento
+
+  pool:
+    image: sv2-roles-builder-image  
+    command: ["./target/release/pool_sv2", "-c", "pool/config-examples/pool-config-docker-local-tp-example.toml"]
+    ports:
+      - "34254:34254" 
+    container_name: sv2-pool
+    depends_on:
+      - sv2-roles-builder
+      - template-provider
+    volumes:
+      - ../roles/pool/config-examples:/usr/src/stratum/roles/pool/config-examples/
+    restart: unless-stopped
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.3
+
+  jd-server:
+    image: sv2-roles-builder-image
+    command: ["./target/release/jd_server", "-c", "jd-server/config-examples/jds-config-docker-local-example.toml"]
+    ports:
+      - "34264:34264"  
+    container_name: sv2-jds
+    depends_on:
+      - sv2-roles-builder
+      - template-provider
+    volumes:
+      - ../roles/jd-server/config-examples:/usr/src/stratum/roles/jd-server/config-examples/
+    restart: unless-stopped
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.4
+
+  jd-client:
+    image: sv2-roles-builder-image
+    command: ["./target/release/jd_client", "-c", "jd-client/config-examples/jdc-config-docker-example.toml"]
+    ports:
+      - "34265:34265"
+    container_name: sv2-jdc
+    volumes:
+      - ../roles/jd-client/config-examples:/usr/src/stratum/roles/jd-client/config-examples/
+    depends_on:
+      - pool 
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.5
+
+  translator:
+    image: sv2-roles-builder-image
+    command: ["./target/release/translator_sv2", "-c", "translator/config-examples/tproxy-config-docker-example.toml"]
+    ports:
+      - "34255:34255" 
+    container_name: sv2-translator
+    depends_on:
+      - jd-client 
+    volumes:
+      - ../roles/translator/config-examples:/usr/src/stratum/roles/translator/config-examples/
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.6
+
+  #test-utils-mining-device:
+    #build:
+      #context: .
+    #command: ["./test-utils-mining-device", "-c", "path/to/test-utils-mining-device/config-file.toml"]
+    #ports:
+      #- "8082:8082"  # Cambia la porta esterna (8082) se necessario
+
+  #test-utils-sv1-mining-device:
+    #build:
+      #context: .
+    #command: ["./test-utils-sv1-mining-device", "-c", "path/to/test-utils-sv1-mining-device/config-file.toml"]
+    #ports:
+      #- "8083:8083"  # Cambia la porta esterna (8083) se necessario
+
+  prometheus:
+    image: prom/prometheus:v2.36.2
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - 9090:9090
+    container_name: prometheus
+    depends_on:
+      - cadvisor
+#      - pushgateway
+    networks:
+      - monitor-net
+    deploy:
+      placement:
+        constraints:
+          - node.role==manager
+      restart_policy:
+        condition: on-failure
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: 
+      - '--path.procfs=/host/proc' 
+      - '--path.sysfs=/host/sys'
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    ports:
+      - 9100:9100
+    container_name: node-exporter
+    networks:
+      - monitor-net
+    deploy:
+      mode: global
+      restart_policy:
+          condition: on-failure
+
+  alertmanager:
+    image: prom/alertmanager
+    ports:
+      - 9093:9093
+    container_name: alertmanager
+    volumes:
+      - "./alertmanager/:/etc/alertmanager/"
+    networks:
+      - monitor-net
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    deploy:
+      placement:
+        constraints:
+           - node.role==manager
+      restart_policy:
+        condition: on-failure    
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor
+    volumes:
+      - /:/rootfs:ro
+      #- /var/run:/var/run:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - 8080:8080
+    container_name: cadvisor
+    networks:
+      - monitor-net
+    deploy:
+      mode: global
+      restart_policy:
+          condition: on-failure
+
+  grafana:
+    image: grafana/grafana
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+    container_name: grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+    env_file:
+      - ./grafana/config.monitoring
+    networks:
+      - monitor-net
+    user: "472"
+    deploy:
+      placement:
+        constraints:
+          - node.role==manager
+      restart_policy:
+        condition: on-failure
+
+#  pushgateway:
+#    image: prom/pushgateway
+#    deploy:
+#      mode: global
+#      restart_policy:
+#        condition: on-failure
+#    ports:
+#      - 9091:9091
+#    networks:
+#      - monitor-net
