@@ -11,32 +11,38 @@ To encourage its adoption, a complete evaluation and measurements of the enhance
 ### **Goals**
 
 1. Enable miners and pool operators to easily **test** and **benchmark** **_SRI_ configurations**:
-    - **Configuration A** \
-<img align="right" style="margin-left:2vw" width="250vw" src="images/SRI_configA.png">
-As already said, in the current SV1 protocol, transaction sets to be mined in the next blocks are selected by pools. With this SV2 configuration they’re selected by individual miners. In this case, miners run **SV2 firmware**, connecting to the **SV2 Mining Proxy**. Using the **Job Declarator** role, individual miners are able to pick up their transactions locally, extracting them from their local **Template Provider**, and declare them to an **SV2 Pool**.
+   
+    - **Configuration A**     
+    As already said, in the current SV1 protocol, transaction sets to be mined in the next blocks are selected by pools. With this SV2 configuration they’re selected by individual miners. In this case, miners run **SV2 firmware**, connecting to the **SV2 Mining Proxy**. Using the **Job Declarator** role, individual miners are able to pick up their transactions locally, extracting them from their local **Template Provider**, and declare them to an **SV2 Pool**.
 
-   - **Configuration B** \
-<img align="right" style="margin-left:2vw" width="250vw" src="images/SRI_configB.png">
-Mining Devices run **SV2 firmware**, so they are able to connect to a **SV2 Mining Proxy** (typically through a standard channel). The proxy aggregates all the standard channels opened into just one open channel with the **SV2 Pool** (group channel or an extended channel). In this configuration, the Proxy **doesn’t** **have** the **Job Declarator** setup, so it’s unable to select transactions from its local Template Provider. Transactions selection is done by the SV2 Pool, as it is in SV1, but now it can benefit from all the **security and performance** features brought by SV2.
-    - **Configuration C** \
-<img align="right" style="margin-left:2vw" width="250vw" src="images/SRI_configC.png">
-Mining Devices **don’t need** to run a **SV2 firmware**. The Proxy which is used to let for efficiency, is also able to translate the SV1 messages that come from the Mining Devices into SV2 messages for the SV2 Pool. In this case, the **Translator Proxy** is not configured to talk to a local Template Provider, so transaction selection is done by the pool. However, this configuration permits to test and use the SV2 protocol features **without** installing any other **SV2 firmware** on the machines.
-    - **Configuration D** \
-<img align="right" style="margin-left:2vw" width="250vw" src="images/SRI_configD.png">
-This configuration is very similar to the previous (config C), but it’s able to add the **transactions selection** feature to it. As represented in this figure, the **Translator Proxy** is joined by a **Job Declarator Client** and a **Template Provider**: it’s able, in this way, to build its own block templates and declare them to the **SV2 Pool**, through an extended channel.
+   - **Configuration B**     
+    Mining Devices run **SV2 firmware**, so they are able to connect to a **SV2 Mining Proxy** (typically through a standard channel). The proxy aggregates all the standard channels opened into just one open channel with the **SV2 Pool** (group channel or an extended channel). In this configuration, the Proxy **doesn’t** **have** the **Job Declarator** setup, so it’s unable to select transactions from its local Template Provider. Transactions selection is done by the SV2 Pool, as it is in SV1, but now it can benefit from all the **security and performance** features brought by SV2.
+
+    - **Configuration C**     
+    Mining Devices **don’t need** to run a **SV2 firmware**. The Proxy which is used to let for efficiency, is also able to translate the SV1 messages that come from the Mining Devices into SV2 messages for the SV2 Pool. In this case, the **Translator Proxy** is not configured to talk to a local Template Provider, so transaction selection is done by the pool. However, this configuration permits to test and use the SV2 protocol features **without** installing any other **SV2 firmware** on the machines.
+
+    - **Configuration D**     
+   This configuration is very similar to the previous (config C), but it’s able to add the **transactions selection** feature to it. As represented in this figure, the **Translator Proxy** is joined by a **Job Declarator Client** and a **Template Provider**: it’s able, in this way, to build its own block templates and declare them to the **SV2 Pool**, through an extended channel.
+
+Configuration A            |  Configuration B         |    Configuration C         |    Configuration D
+:-------------------------:|:-------------------------:|:-------------------------:|:-------------------------:
+![](images/SRI_configA.png)  |  ![](images/SRI_configB.png)  |  ![](images/SRI_configC.png)  |  ![](images/SRI_configD.png)
 
 
-1. Facilitate **testing**, **bug reporting** and **feedback collection** from testers:
+2. Facilitate **testing**, **bug reporting** and **feedback collection** from testers:
     - Provide a testing suite to easily test every _SRI_ configuration
     - Easy way to customize every _role_ configuration
     - Incorporate bug reporting mechanisms into testing tool
-2. Provide a pre-built **benchmarking** tool for mining industry stakeholders to **evaluate SV2** protocol performances:
+      
+3. Provide a pre-built **benchmarking** tool for mining industry stakeholders to **evaluate SV2** protocol performances:
     - Generate benchmark data for every _SRI_ configuration.
     - Automatic report generation containing benchmark data
-3. Provide a way to **compare **protocol **performances** between** SV2 and SV1**:
+      
+4. Provide a way to **compare **protocol **performances** between** SV2 and SV1**:
     - Generate benchmark data for SV1 context
     - Automatic comparison report generation
-4. Allow external verification of benchmark data documented in the future **SV1-SV2 comparison** report.
+      
+5. Allow external verification of benchmark data documented in the future **SV1-SV2 comparison** report.
 
 
 ## **Interface**
