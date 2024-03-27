@@ -1,9 +1,9 @@
-FROM rust:latest as builder
+FROM rust:1.75 as builder
 WORKDIR usr/src/stratum/
-COPY ../.. .
+COPY . .
 WORKDIR roles/
 RUN cargo build --release
 
-FROM rust:latest
+FROM rust:1.75
 COPY --from=builder /usr/src/stratum/roles/ /usr/src/stratum/roles
 WORKDIR /usr/src/stratum/roles

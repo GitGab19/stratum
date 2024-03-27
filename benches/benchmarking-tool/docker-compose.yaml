@@ -28,15 +28,15 @@ services:
     container_name: sv2-tp
     volumes:
       - bitcoin_data:/root/.bitcoin
-      - ./bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - ./sri-configs/bitcoin.conf:/root/.bitcoin/bitcoin.conf
     networks:
       sv2-net:
           ipv4_address: 10.5.0.2
 
   sv2-roles-builder:
     build:
-      context: ../../roles
-      dockerfile: ../benches/benchmarking-tool/sri-roles.dockerfile
+      context: ../../
+      dockerfile: benches/benchmarking-tool/sri-roles.dockerfile
     container_name: sv2-roles-builder
     image: sv2-roles-builder-image  
     command: echo "SRI build completed"  
@@ -58,7 +58,7 @@ services:
       - sv2-roles-builder
       - template-provider
     volumes:
-      - ../roles/pool/config-examples:/usr/src/stratum/roles/pool/config-examples/
+      - ./sri-configs:/usr/src/stratum/roles/pool/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -74,7 +74,7 @@ services:
       - sv2-roles-builder
       - template-provider
     volumes:
-      - ../roles/jd-server/config-examples:/usr/src/stratum/roles/jd-server/config-examples/
+      - ./sri-configs:/usr/src/stratum/roles/jd-server/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -87,7 +87,7 @@ services:
       - "34265:34265"
     container_name: sv2-jdc
     volumes:
-      - ../roles/jd-client/config-examples:/usr/src/stratum/roles/jd-client/config-examples/
+      - ./sri-configs:/usr/src/stratum/roles/jd-client/config-examples/
     depends_on:
       - pool 
     networks:
@@ -103,7 +103,7 @@ services:
     depends_on:
       - jd-client 
     volumes:
-      - ../roles/translator/config-examples:/usr/src/stratum/roles/translator/config-examples/
+      - ./sri-configs:/usr/src/stratum/roles/translator/config-examples/
     networks:
       sv2-net:
           ipv4_address: 10.5.0.6
