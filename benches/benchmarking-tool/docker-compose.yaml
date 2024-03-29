@@ -19,7 +19,7 @@ services:
     build:
       dockerfile: ./template-provider.dockerfile
     image: sv2-template-provider 
-    command: ["/bitcoin/src/bitcoind", "-testnet", "-sv2", "-sv2port=8442", "-sv2interval=10", "-sv2feedelta=100"]   
+    command: ["/bitcoin/src/bitcoind", "-testnet", "-sv2", "-sv2port=8442", "-sv2interval=10", "-sv2feedelta=100", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
     ports:
       - "8442:8442"
       - "8333:8333"

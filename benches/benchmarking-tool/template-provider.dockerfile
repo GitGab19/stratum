@@ -29,10 +29,10 @@ RUN ./autogen.sh
 RUN ./configure --enable-suppress-external-warnings --disable-bench --disable-tests --disable-fuzz-binary --without-gui --disable-wallet
 
 # Build with parallel jobs (use "-j N" for N parallel jobs)
-RUN make 
+RUN make -j 4
 
 # Copy the custom bitcoin.conf file into the container
-COPY bitcoin.conf /root/.bitcoin/bitcoin.conf
+COPY sri-configs/bitcoin.conf /root/.bitcoin/bitcoin.conf
 
 # Create a volume for blockchain data and configuration files
 # docker run -v /path/to/host/directory:/root/.bitcoin bitcoin-sv2
