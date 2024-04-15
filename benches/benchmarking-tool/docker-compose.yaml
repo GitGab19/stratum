@@ -108,19 +108,25 @@ services:
       sv2-net:
           ipv4_address: 10.5.0.6
 
-  #test-utils-mining-device:
-    #build:
-      #context: .
-    #command: ["./test-utils-mining-device", "-c", "path/to/test-utils-mining-device/config-file.toml"]
-    #ports:
-      #- "8082:8082"  # Cambia la porta esterna (8082) se necessario
-
-  #test-utils-sv1-mining-device:
-    #build:
-      #context: .
-    #command: ["./test-utils-sv1-mining-device", "-c", "path/to/test-utils-sv1-mining-device/config-file.toml"]
-    #ports:
-      #- "8083:8083"  # Cambia la porta esterna (8083) se necessario
+  sv1-public-pool:
+    container_name: sv1-public-pool
+    build:
+      context: .
+      dockerfile: ./sv1-public-pool.dockerfile
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3333:3333"
+      - "3334:3334"
+    volumes:
+      - "./testnet-DB:/public-pool/DB"
+      - "./sri-configs/.env:/public-pool/.env:ro"
+    environment:
+      - NODE_ENV=production
+    networks:
+      sv2-net:
+        ipv4_address: 10.5.0.7
 
   prometheus:
     image: prom/prometheus:v2.36.2
