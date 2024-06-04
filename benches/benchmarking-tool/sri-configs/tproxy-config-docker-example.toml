@@ -4,7 +4,7 @@
 # upstream_port = 3336
 
 # Local SRI JDC Upstream Connection
-upstream_address = "10.5.0.5"
+upstream_address = "10.5.0.6"
 upstream_port = 34265
 upstream_authority_pubkey = "9auqWEzQDVyd2oe1JVGFLMLHZtCo2FFqZwtKA5gd9xbuEu7PH72"
 
