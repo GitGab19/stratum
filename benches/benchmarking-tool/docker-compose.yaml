@@ -3,7 +3,8 @@ version: '3'
 volumes:
     prometheus_data:
     grafana_data: 
-    bitcoin_data:
+    bitcoin_pool_side_data:
+    bitcoin_miner_side_data:
 
 networks:
   monitor-net:
@@ -37,8 +38,8 @@ services:
       - "48332:48332"
     container_name: sv2-tp-pool-side
     volumes:
-      - bitcoin_data:/root/.bitcoin
-      - ./sri-configs/bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - bitcoin_pool_side_data:/root/.bitcoin
+      - ./sri-configs/bitcoin-tp-pool.conf:/root/.bitcoin/bitcoin.conf
     restart: unless-stopped
     networks:
       sv2-net:
@@ -48,17 +49,16 @@ services:
     build:
       dockerfile: ./template-provider.dockerfile
     image: sv2-template-provider
-    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8442", "-sv2interval=15", "-sv2feedelta=100", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
+    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8443", "-sv2interval=15", "-sv2feedelta=100", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
     ports:
-      - "8442:8442"
-      - "8333:8333"
-      - "8332:8332"
+      - "8443:8443"
+      - "18333:8333"
+      #- "18332:8332"
       #- "18332:18332"
-      - "48332:48332"
     container_name: sv2-tp-miner-side
     volumes:
-      - bitcoin_data:/root/.bitcoin
-      - ./sri-configs/bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - bitcoin_miner_side_data:/root/.bitcoin
+      - ./sri-configs/bitcoin-tp-miner.conf:/root/.bitcoin/bitcoin.conf
     restart: unless-stopped
     networks:
       sv2-net:
@@ -72,7 +72,7 @@ services:
     container_name: sv2-pool
     depends_on:
       - sv2-roles-builder
-      - template-provider
+      - template-provider-pool-side
     volumes:
       - ./sri-configs:/usr/src/stratum/roles/pool/config-examples/
     restart: unless-stopped
@@ -88,7 +88,7 @@ services:
     container_name: sv2-jds
     depends_on:
       - sv2-roles-builder
-      - template-provider
+      - template-provider-pool-side
     volumes:
       - ./sri-configs:/usr/src/stratum/roles/jd-server/config-examples/
     restart: unless-stopped
@@ -108,6 +108,7 @@ services:
     depends_on:
       - pool 
       - jd-server
+      - template-provider-miner-side
     networks:
       sv2-net:
           ipv4_address: 10.5.0.6
@@ -132,6 +133,8 @@ services:
     build:
       context: .
       dockerfile: ./sv1-public-pool.dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "3333:3333"
       - "3334:3334"
@@ -144,21 +147,21 @@ services:
     networks:
       sv2-net:
         ipv4_address: 10.5.0.8
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
-  #monitor-tp-traffic:
+  #monitor-sv1-miner-traffic:
     #build:
       #context: .
       #dockerfile: ./monitor-tp-traffic.dockerfile
-    #container_name: monitor-tp-traffic
+    #image: inzania/network-traffic-metrics:latest
+    #network_mode: host
+    #container_name: monitor-sv1-miner-traffic
     #ports:
       #- 8000:8000
     #depends_on:
       #- template-provider
     #environment:
-      #- "NTM_INTERFACE=eth0"
-      #- "NTM_FILTERS="
+      #- "NTM_INTERFACE=any"
+      #- "NTM_FILTERS=port 3333"
     #networks:
       #sv2-net:
         #ipv4_address: 10.5.0.8
