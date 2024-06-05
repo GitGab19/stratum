@@ -1,5 +1,5 @@
 # SRI JDC config
-downstream_address = "10.5.0.5"
+downstream_address = "10.5.0.6"
 downstream_port = 34265
 
 # Version support
@@ -25,7 +25,7 @@ retry = 10
 
 # Template Provider config
 # Local TP (this is pointing to localhost so you must run a TP locally for this configuration to work)
-tp_address = "10.5.0.3:8442"
+tp_address = "10.5.0.3:8443"
 # Hosted testnet TP 
 # tp_address = "75.119.150.111:8442"
 
