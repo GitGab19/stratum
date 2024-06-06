@@ -39,7 +39,7 @@ services:
     container_name: sv2-tp-pool-side
     volumes:
       - bitcoin_pool_side_data:/root/.bitcoin
-      - ./sri-configs/bitcoin-tp-pool.conf:/root/.bitcoin/bitcoin.conf
+      - ./custom-configs/sri-roles/bitcoin-tp-pool.conf:/root/.bitcoin/bitcoin.conf
     restart: unless-stopped
     networks:
       sv2-net:
@@ -58,7 +58,7 @@ services:
     container_name: sv2-tp-miner-side
     volumes:
       - bitcoin_miner_side_data:/root/.bitcoin
-      - ./sri-configs/bitcoin-tp-miner.conf:/root/.bitcoin/bitcoin.conf
+      - ./custom-configs/sri-roles/bitcoin-tp-miner.conf:/root/.bitcoin/bitcoin.conf
     restart: unless-stopped
     networks:
       sv2-net:
@@ -66,7 +66,7 @@ services:
 
   pool:
     image: sv2-roles-builder-image  
-    command: ["./target/release/pool_sv2", "-c", "pool/config-examples/pool-config-docker-local-tp-example.toml"]
+    command: ["./target/release/pool_sv2", "-c", "pool/config-examples/pool-config-a-docker-example.toml"]
     ports:
       - "34254:34254" 
     container_name: sv2-pool
@@ -74,7 +74,7 @@ services:
       - sv2-roles-builder
       - template-provider-pool-side
     volumes:
-      - ./sri-configs:/usr/src/stratum/roles/pool/config-examples/
+      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/pool/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -82,7 +82,7 @@ services:
 
   jd-server:
     image: sv2-roles-builder-image
-    command: ["./target/release/jd_server", "-c", "jd-server/config-examples/jds-config-docker-local-example.toml"]
+    command: ["./target/release/jd_server", "-c", "jd-server/config-examples/jds-config-a-docker-example.toml"]
     ports:
       - "34264:34264"  
     container_name: sv2-jds
@@ -90,7 +90,7 @@ services:
       - sv2-roles-builder
       - template-provider-pool-side
     volumes:
-      - ./sri-configs:/usr/src/stratum/roles/jd-server/config-examples/
+      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/jd-server/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -98,12 +98,12 @@ services:
 
   jd-client:
     image: sv2-roles-builder-image
-    command: ["./target/release/jd_client", "-c", "jd-client/config-examples/jdc-config-docker-example.toml"]
+    command: ["./target/release/jd_client", "-c", "jd-client/config-examples/jdc-config-a-docker-example.toml"]
     ports:
       - "34265:34265"
     container_name: sv2-jdc
     volumes:
-      - ./sri-configs:/usr/src/stratum/roles/jd-client/config-examples/
+      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/jd-client/config-examples/
     restart: unless-stopped
     depends_on:
       - pool 
@@ -115,14 +115,14 @@ services:
 
   translator:
     image: sv2-roles-builder-image
-    command: ["./target/release/translator_sv2", "-c", "translator/config-examples/tproxy-config-docker-example.toml"]
+    command: ["./target/release/translator_sv2", "-c", "translator/config-examples/tproxy-config-a-docker-example.toml"]
     ports:
       - "34255:34255" 
     container_name: sv2-translator
     depends_on:
       - jd-client 
     volumes:
-      - ./sri-configs:/usr/src/stratum/roles/translator/config-examples/
+      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/translator/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -133,14 +133,15 @@ services:
     build:
       context: .
       dockerfile: ./sv1-public-pool.dockerfile
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    #extra_hosts:
+      #- "host.docker.internal:host-gateway"
     ports:
       - "3333:3333"
       - "3334:3334"
     volumes:
       - "./testnet-DB:/public-pool/DB"
-      - "./sri-configs/.env:/public-pool/.env:ro"
+      - "./custom-configs/sv1-public-pool/.env:/public-pool/.env:ro"
+      - "./custom-configs/sv1-public-pool/rpc.js:/public-pool/node_modules/rpc-bitcoin/build/src/rpc.js" # to fix rpc-version field issue 
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -148,20 +149,20 @@ services:
       sv2-net:
         ipv4_address: 10.5.0.8
 
-  #monitor-sv1-miner-traffic:
+  monitor-sv1-miner-traffic:
     #build:
       #context: .
       #dockerfile: ./monitor-tp-traffic.dockerfile
-    #image: inzania/network-traffic-metrics:latest
-    #network_mode: host
-    #container_name: monitor-sv1-miner-traffic
+    image: inzania/network-traffic-metrics:latest
+    network_mode: host
+    container_name: monitor-sv1-miner-traffic
     #ports:
       #- 8000:8000
     #depends_on:
       #- template-provider
-    #environment:
-      #- "NTM_INTERFACE=any"
-      #- "NTM_FILTERS=port 3333"
+    environment:
+      - "NTM_INTERFACE=any"
+      - "NTM_FILTERS="
     #networks:
       #sv2-net:
         #ipv4_address: 10.5.0.8
@@ -195,7 +196,7 @@ services:
     #extra_hosts:
       #- "monitor:127.0.0.1"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:10.5.0.1"
 
   node-exporter:
     image: quay.io/prometheus/node-exporter:latest
@@ -211,9 +212,10 @@ services:
     ports:
       - 9100:9100
     container_name: node-exporter
-    networks:
-      sv2-net:
-        ipv4_address: 10.5.0.10
+    network_mode: host
+    #networks:
+      #sv2-net:
+        #ipv4_address: 10.5.0.10
     deploy:
       mode: global
       restart_policy:
