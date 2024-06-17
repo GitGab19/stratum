@@ -5,6 +5,7 @@ volumes:
     grafana_data: 
     bitcoin_pool_side_data:
     bitcoin_miner_side_data:
+    bitcoin_sv1_pool_side_data:
 
 networks:
   monitor-net:
@@ -63,6 +64,26 @@ services:
     networks:
       sv2-net:
           ipv4_address: 10.5.0.3
+
+  sv1-node-pool-side:
+    build:
+      dockerfile: ./template-provider.dockerfile
+    image: sv2-template-provider
+    command: ["/bitcoin/src/bitcoind", "-testnet4"]   
+    ports:
+      #- "8443:8443"
+      - "28333:8333"
+      #- "18332:8332"
+      #- "18332:18332"
+      - "48333:48332"
+    container_name: sv1-node-pool-side
+    volumes:
+      - bitcoin_sv1_pool_side_data:/root/.bitcoin
+      - ./custom-configs/sri-roles/bitcoin-sv1-node-pool.conf:/root/.bitcoin/bitcoin.conf
+    restart: unless-stopped
+    networks:
+      sv2-net:
+          ipv4_address: 10.5.0.16
 
   pool:
     image: sv2-roles-builder-image  
@@ -149,13 +170,13 @@ services:
       sv2-net:
         ipv4_address: 10.5.0.8
 
-  monitor-sv1-miner-traffic:
+  monitor-traffic-tcpdump:
     #build:
       #context: .
       #dockerfile: ./monitor-tp-traffic.dockerfile
     image: inzania/network-traffic-metrics:latest
     network_mode: host
-    container_name: monitor-sv1-miner-traffic
+    container_name: monitor-traffic-tcpdump
     #ports:
       #- 8000:8000
     #depends_on:

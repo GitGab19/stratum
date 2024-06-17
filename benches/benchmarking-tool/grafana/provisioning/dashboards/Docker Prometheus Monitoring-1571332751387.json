@@ -145,7 +145,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.8\", src!=\"10.5.0.2\", src!=\"192.168.65.7\", src!=\"192.168.65.254\"}[10s]))\n",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.8\", src!=\"10.5.0.16\", src!=\"192.168.65.7\", src!=\"192.168.65.254\"}[10s]))\n",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
@@ -268,7 +268,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.8\", dst!=\"10.5.0.2\", dst!=\"192.168.65.7\", dst!=\"192.168.65.254\"}[10s]))\n",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.8\", dst!=\"10.5.0.16\", dst!=\"192.168.65.7\", dst!=\"192.168.65.254\"}[10s]))\n",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
@@ -680,7 +680,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.8\", dst!=\"10.5.0.2\", dst!=\"192.168.65.7\", dst!=\"192.168.65.254\"}[10s]))\n",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.8\", dst!=\"10.5.0.16\", dst!=\"192.168.65.7\", dst!=\"192.168.65.254\"}[10s]))\n",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
@@ -696,7 +696,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.2\", dst!=\"192.168.65.1\", dst!=\"10.5.0.4\", dst!=\"10.5.0.5\"}[10s]))",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{src=\"10.5.0.16\", dst!=\"192.168.65.1\", dst!=\"10.5.0.8\"}[10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "bitcoin-node",
@@ -816,7 +816,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.8\", src!=\"10.5.0.2\", src!=\"192.168.65.7\", src!=\"192.168.65.254\"}[10s]))\n",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.8\", src!=\"10.5.0.16\", src!=\"192.168.65.7\", src!=\"192.168.65.254\"}[10s]))\n",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
@@ -832,7 +832,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.2\", src!=\"192.168.65.1\", src!=\"10.5.0.4\", src!=\"10.5.0.5\"}[10s]))\n",
+          "expr": "sum by (id, name) (irate(ntm_bytes_total{dst=\"10.5.0.16\", src!=\"192.168.65.1\", src!=\"10.5.0.8\"}[10s]))\n",
           "hide": false,
           "instant": false,
           "legendFormat": "bitcoin-node",
@@ -4037,6 +4037,6 @@
   "timezone": "browser",
   "title": "Docker Prometheus Monitoring",
   "uid": "64nrElFmk",
-  "version": 2,
+  "version": 4,
   "weekStart": ""
 }
