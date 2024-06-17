@@ -1281,6 +1281,22 @@
           "range": true,
           "refId": "A",
           "step": 10
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{name=~\"sv1-node-pool-side\"}[1m])) by (id, name) \n",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{ name }}",
+          "metric": "container_network_receive_bytes_total",
+          "range": true,
+          "refId": "B",
+          "step": 10
         }
       ],
       "title": "Pool Roles - CPU Usage ",
@@ -1396,6 +1412,22 @@
           "metric": "container_network_receive_bytes_total",
           "range": true,
           "refId": "A",
+          "step": 10
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "container_memory_usage_bytes{name=~\"sv1-node-pool-side\"}\n",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{ name }}",
+          "metric": "container_network_receive_bytes_total",
+          "range": true,
+          "refId": "B",
           "step": 10
         }
       ],
@@ -1513,6 +1545,22 @@
           "range": true,
           "refId": "A",
           "step": 10
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum by (id, name) (irate(container_network_transmit_bytes_total{name=~\"sv1-node-pool-side\"}[5m]))\n",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{ name }}",
+          "metric": "container_network_receive_bytes_total",
+          "range": true,
+          "refId": "B",
+          "step": 10
         }
       ],
       "title": "Pool Roles - Network Tx",
@@ -1628,6 +1676,22 @@
           "metric": "container_network_receive_bytes_total",
           "range": true,
           "refId": "A",
+          "step": 10
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum by (id, name) (irate(container_network_receive_bytes_total{name=~\"sv1-node-pool-side\"}[5m]))\n",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{ name }}",
+          "metric": "container_network_receive_bytes_total",
+          "range": true,
+          "refId": "B",
           "step": 10
         }
       ],
@@ -4005,7 +4069,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-5m",
     "to": "now"
   },
   "timeRangeUpdatedDuringEditOrView": false,
