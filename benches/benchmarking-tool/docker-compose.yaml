@@ -25,15 +25,23 @@ services:
     container_name: sv2-roles-builder
     image: sv2-roles-builder-image  
     command: echo "SRI build completed"  
+  
+  #custom-proxies-builder:
+    #build:
+      #context: ../../
+      #dockerfile: benches/benchmarking-tool/custom-proxies.dockerfile
+    #container_name: custom-proxies-builder
+    #image: custom-proxies-builder-image  
+    #command: echo "Custom proxies build completed"
 
   template-provider-pool-side:
     build:
       dockerfile: ./template-provider.dockerfile
     image: sv2-template-provider
-    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8442", "-sv2interval=15", "-sv2feedelta=100", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
+    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8442", "-sv2interval=15", "-sv2feedelta=0", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
     ports:
       - "8442:8442"
-      - "8333:8333"
+      - "18333:48333"
       - "8332:8332"
       #- "18332:18332"
       - "48332:48332"
@@ -50,10 +58,10 @@ services:
     build:
       dockerfile: ./template-provider.dockerfile
     image: sv2-template-provider
-    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8443", "-sv2interval=15", "-sv2feedelta=100", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
+    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8443", "-sv2interval=15", "-sv2feedelta=0", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
     ports:
       - "8443:8443"
-      - "18333:8333"
+      - "28333:18333"
       #- "18332:8332"
       #- "18332:18332"
     container_name: sv2-tp-miner-side
@@ -72,7 +80,7 @@ services:
     command: ["/bitcoin/src/bitcoind", "-testnet4"]   
     ports:
       #- "8443:8443"
-      - "28333:8333"
+      - "38333:18333"
       #- "18332:8332"
       #- "18332:18332"
       - "48333:48332"
@@ -148,6 +156,23 @@ services:
     networks:
       sv2-net:
           ipv4_address: 10.5.0.7
+
+  #pool-jdc-proxy:
+    #image: custom-proxies-builder-image  
+    #command: ["./target/release/proxy-between-pool-and-jdc"]
+    #ports:
+      #- "34254:34254" 
+      #- "34251:34251"
+    #container_name: pool-jdc-proxy
+    #depends_on:
+      #- custom-proxies-builder
+      #- pool
+    #volumes:
+      #- ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/pool/config-examples/
+    #restart: unless-stopped
+    #networks:
+      #sv2-net:
+          #ipv4_address: 10.5.0.17
 
   sv1-public-pool:
     container_name: sv1-public-pool
