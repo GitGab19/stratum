@@ -196,22 +196,12 @@ services:
         ipv4_address: 10.5.0.8
 
   monitor-traffic-tcpdump:
-    #build:
-      #context: .
-      #dockerfile: ./monitor-tp-traffic.dockerfile
     image: inzania/network-traffic-metrics:latest
     network_mode: host
     container_name: monitor-traffic-tcpdump
-    #ports:
-      #- 8000:8000
-    #depends_on:
-      #- template-provider
     environment:
       - "NTM_INTERFACE=any"
       - "NTM_FILTERS="
-    #networks:
-      #sv2-net:
-        #ipv4_address: 10.5.0.8
 
   prometheus:
     image: prom/prometheus:v2.36.2
@@ -239,8 +229,6 @@ services:
           - node.role==manager
       restart_policy:
         condition: on-failure
-    #extra_hosts:
-      #- "monitor:127.0.0.1"
     extra_hosts:
       - "host.docker.internal:10.5.0.1"
 
@@ -258,10 +246,9 @@ services:
     ports:
       - 9100:9100
     container_name: node-exporter
-    network_mode: host
-    #networks:
-      #sv2-net:
-        #ipv4_address: 10.5.0.10
+    networks:
+      sv2-net:
+        ipv4_address: 10.5.0.10
     deploy:
       mode: global
       restart_policy:
