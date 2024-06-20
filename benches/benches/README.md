@@ -1,4 +1,4 @@
-# SV1 and SV2 clients benchmarks
+# Sv1 and Sv2 clients benchmarks
 This directory contains code that benchmarks the performance of sv1 and sv2 clients using the `criterion` and `iai` library.
 
 The benchmarking project aims to compare the performance of sv2 against sv1 and demonstrate the improvements of sv2. The benchmarks measure various aspects of the clients' performance, including  subscription latency, share submission time, systems requirements such as RAM access, Instructions per cycle and more..
