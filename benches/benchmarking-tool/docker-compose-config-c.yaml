@@ -1,10 +1,9 @@
 version: '3'
 
 volumes:
-    prometheus_data:
-    grafana_data: 
+    prometheus_data_config_c:
+    grafana_data_config_c: 
     bitcoin_pool_side_data:
-    bitcoin_miner_side_data:
     bitcoin_sv1_pool_side_data:
 
 networks:
@@ -38,7 +37,7 @@ services:
     build:
       dockerfile: ./template-provider.dockerfile
     image: sv2-template-provider
-    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8442", "-sv2interval=15", "-sv2feedelta=0", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
+    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8442", "-sv2interval=60", "-sv2feedelta=0", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
     ports:
       - "8442:8442"
       - "18333:48333"
@@ -53,25 +52,6 @@ services:
     networks:
       sv2-net:
           ipv4_address: 10.5.0.2
-
-  template-provider-miner-side:
-    build:
-      dockerfile: ./template-provider.dockerfile
-    image: sv2-template-provider
-    command: ["/bitcoin/src/bitcoind", "-testnet4", "-sv2", "-sv2port=8443", "-sv2interval=15", "-sv2feedelta=0", "-debug=sv2", "-loglevel=sv2:trace", "-sv2bind=0.0.0.0"]   
-    ports:
-      - "8443:8443"
-      - "28333:18333"
-      #- "18332:8332"
-      #- "18332:18332"
-    container_name: sv2-tp-miner-side
-    volumes:
-      - bitcoin_miner_side_data:/root/.bitcoin
-      - ./custom-configs/sri-roles/bitcoin-tp-miner.conf:/root/.bitcoin/bitcoin.conf
-    restart: unless-stopped
-    networks:
-      sv2-net:
-          ipv4_address: 10.5.0.3
 
   sv1-node-pool-side:
     build:
@@ -95,7 +75,7 @@ services:
 
   pool:
     image: sv2-roles-builder-image  
-    command: ["./target/release/pool_sv2", "-c", "pool/config-examples/pool-config-a-docker-example.toml"]
+    command: ["./target/release/pool_sv2", "-c", "pool/config-examples/pool-config-c-docker-example.toml"]
     ports:
       - "34254:34254" 
     container_name: sv2-pool
@@ -103,55 +83,22 @@ services:
       - sv2-roles-builder
       - template-provider-pool-side
     volumes:
-      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/pool/config-examples/
+      - ./custom-configs/sri-roles/config-c:/usr/src/stratum/roles/pool/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
           ipv4_address: 10.5.0.4
 
-  jd-server:
-    image: sv2-roles-builder-image
-    command: ["./target/release/jd_server", "-c", "jd-server/config-examples/jds-config-a-docker-example.toml"]
-    ports:
-      - "34264:34264"  
-    container_name: sv2-jds
-    depends_on:
-      - sv2-roles-builder
-      - template-provider-pool-side
-    volumes:
-      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/jd-server/config-examples/
-    restart: unless-stopped
-    networks:
-      sv2-net:
-          ipv4_address: 10.5.0.5
-
-  jd-client:
-    image: sv2-roles-builder-image
-    command: ["./target/release/jd_client", "-c", "jd-client/config-examples/jdc-config-a-docker-example.toml"]
-    ports:
-      - "34265:34265"
-    container_name: sv2-jdc
-    volumes:
-      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/jd-client/config-examples/
-    restart: unless-stopped
-    depends_on:
-      - pool 
-      - jd-server
-      - template-provider-miner-side
-    networks:
-      sv2-net:
-          ipv4_address: 10.5.0.6
-
   translator:
     image: sv2-roles-builder-image
-    command: ["./target/release/translator_sv2", "-c", "translator/config-examples/tproxy-config-a-docker-example.toml"]
+    command: ["./target/release/translator_sv2", "-c", "translator/config-examples/tproxy-config-c-docker-example.toml"]
     ports:
       - "34255:34255" 
     container_name: sv2-translator
     depends_on:
-      - jd-client 
+      - pool 
     volumes:
-      - ./custom-configs/sri-roles/config-a:/usr/src/stratum/roles/translator/config-examples/
+      - ./custom-configs/sri-roles/config-c:/usr/src/stratum/roles/translator/config-examples/
     restart: unless-stopped
     networks:
       sv2-net:
@@ -207,7 +154,7 @@ services:
     image: prom/prometheus:v2.36.2
     volumes:
       - ./prometheus/:/etc/prometheus/
-      - prometheus_data:/prometheus
+      - prometheus_data_config_c:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -252,27 +199,7 @@ services:
     deploy:
       mode: global
       restart_policy:
-          condition: on-failure
-
-  alertmanager:
-    image: prom/alertmanager
-    ports:
-      - 9093:9093
-    container_name: alertmanager
-    volumes:
-      - "./alertmanager/:/etc/alertmanager/"
-    networks:
-      sv2-net:
-        ipv4_address: 10.5.0.11
-    command:
-      - '--config.file=/etc/alertmanager/config.yml'
-      - '--storage.path=/alertmanager'
-    deploy:
-      placement:
-        constraints:
-           - node.role==manager
-      restart_policy:
-        condition: on-failure    
+          condition: on-failure   
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor
@@ -310,8 +237,9 @@ services:
       GF_LOG_FILTERS: rendering:debug
     container_name: grafana
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      - grafana_data_config_c:/var/lib/grafana
+      - ./grafana/provisioning/dashboards/config-c:/etc/grafana/provisioning/dashboards
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
     env_file:
       - ./grafana/config.monitoring
     networks:
