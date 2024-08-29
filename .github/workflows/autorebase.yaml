@@ -1,0 +1,33 @@
+name: Automatic Rebase
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  rebase:
+    name: Rebase
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.issue.pull_request != '' && 
+      (
+        contains(github.event.comment.body, '/rebase') || 
+        contains(github.event.comment.body, '/autosquash')
+      )
+    steps:
+      - name: Checkout the latest code
+        uses: actions/checkout@v3
+        with:
+          #persist-credentials: false
+          token: ${{ secrets.GITGAB_SRI_PERSONAL_TOKEN }}
+          fetch-depth: 0 # otherwise, you will fail to push refs to dest repo
+          
+      - name: Configure git
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Automatic Rebase
+        uses: cirrus-actions/rebase@1.8
+        with:
+          autosquash: ${{ contains(github.event.comment.body, '/autosquash') || contains(github.event.comment.body, '/rebase-autosquash') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITGAB_SRI_PERSONAL_TOKEN }}
