@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   rebase:
     runs-on: ubuntu-latest
@@ -15,7 +19,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           persist-credentials: false
-          token: ${{ secrets.GITGAB_SRI_PERSONAL_TOKEN }}  # Use GitHub's default token
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use GitHub's default token
           fetch-depth: 0  # Fetch full history to have the entire commit history
 
       - name: Fetch open pull requests with label
@@ -23,7 +27,7 @@ jobs:
           gh auth setup-git
           gh pr list --state open --label "ready-to-be-merged" --json number,headRepositoryOwner,headRefName --jq '.[] | "\(.number) \(.headRepositoryOwner.login) \(.headRefName)"' > pr_details.txt
         env:
-          GITHUB_TOKEN: ${{ secrets.GITGAB_SRI_PERSONAL_TOKEN }}  # Use GitHub's default token
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use GitHub's default token
 
       - name: Rebase pull requests
         run: |
@@ -71,4 +75,4 @@ jobs:
 
           done < pr_details.txt
         env:
-          GITHUB_TOKEN: ${{ secrets.GITGAB_SRI_PERSONAL_TOKEN }}  # Use GitHub's default token
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use GitHub's default token
