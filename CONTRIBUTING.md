@@ -1,3 +1,4 @@
+TEST!
 <!-- omit in toc -->
 # Contributing to SRI (Stratum V2 Reference Implementation)
 
