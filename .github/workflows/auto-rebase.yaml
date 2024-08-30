@@ -13,18 +13,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          #persist-credentials: false
-          #token: ${{ secrets.GITHUB_TOKEN }}  # Use GitHub's default token
-          fetch-depth: 0  # Fetch full history to have the entire commit history
+      
 
       - uses: tibdex/github-app-token@v1
         id: generate-token
         with:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          #persist-credentials: false
+          #token: ${{ secrets.GITHUB_TOKEN }}  # Use GitHub's default token
+          fetch-depth: 0  # Fetch full history to have the entire commit history
 
       - name: Fetch open pull requests with label
         run: |
