@@ -34,16 +34,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Generate code coverage for each crate
+      - name: Generate code coverage
         run: |
-          # Generate coverage for noise_sv2
-          cargo tarpaulin --all-targets --out Xml --manifest-path protocols/v2/noise-sv2/Cargo.toml
-          mv cobertura.xml protocols/v2/noise-sv2/cobertura.xml
-
-          # Generate coverage for another crate (add additional crates similarly)
-          cargo tarpaulin --all-targets --out Xml --manifest-path protocols/v2/codec-sv2/Cargo.toml
-          mv cobertura.xml protocols/v2/codec-sv2/cobertura.xml
+          ./scripts/tarpaulin.sh
 
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v4
