@@ -26,7 +26,6 @@ on:
 
 jobs:
   tarpaulin-test:
-
     name: Tarpaulin Test
     runs-on: ubuntu-latest
     container:
@@ -36,15 +35,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate code coverage
+      - name: Generate code coverage for each crate
         run: |
-          ./scripts/tarpaulin.sh
+          # Generate coverage for noise_sv2
+          cargo tarpaulin --all-targets --out Xml --manifest-path protocols/v2/noise-sv2/Cargo.toml
+          mv cobertura.xml protocols/v2/noise-sv2/cobertura.xml
 
-      - name: Archive Tarpaulin code coverage results
-        uses: actions/upload-artifact@v4
+          # Generate coverage for another crate (add additional crates similarly)
+          cargo tarpaulin --all-targets --out Xml --manifest-path protocols/v2/codec-sv2/Cargo.toml
+          mv cobertura.xml protocols/v2/codec-sv2/cobertura.xml
+
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v4
         with:
-          name: tarpaulin-report
-          path: |
-            protocols/cobertura.xml
-            roles/cobertura.xml
-            utils/cobertura.xml
+          files: |
+            protocols/v2/noise-sv2/cobertura.xml
+            protocols/v2/codec-sv2/cobertura.xml
+          flags: |
+            noise_sv2
+            codec_sv2
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}

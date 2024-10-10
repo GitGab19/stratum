@@ -4,6 +4,8 @@
 [![docs.rs](https://docs.rs/const_sv2/badge.svg)](https://docs.rs/const_sv2)
 [![rustc+](https://img.shields.io/badge/rustc-1.75.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
 [![license](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/stratum-mining/stratum/blob/main/LICENSE.md)
+[![codecov](https://codecov.io/gh/GitGab19/stratum/branch/main/graph/badge.svg?flag=noise_sv2)](https://app.codecov.io/gh/GitGab19/stratum/tree/main/protocols/v2/noise-sv2)
+[![codecov](https://codecov.io/gh/GitGab19/stratum/branch/main/graph/badge.svg?flag=codec_sv2)](https://app.codecov.io/gh/GitGab19/stratum/tree/main/protocols/v2/codec-sv2)
 
 `const_sv2` is a Rust crate that provides essential constants for the Sv2 (Stratum V2) protocol. These constants are crucial for message framing, encryption, and protocol-specific identifiers across various Sv2 components, including Mining, Job Declaration, and Template Distribution protocols.
 
