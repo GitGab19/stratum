@@ -244,7 +244,7 @@ mod tests {
     use quickcheck::{Arbitrary, Gen};
     use std::convert::TryFrom;
 
-    use stratum_common::bitcoin::{Script, TxOut};
+    use stratum_common::bitcoin::{ScriptBuf, TxOut};
 
     const BLOCK_REWARD: u64 = 625_000_000_000;
 
@@ -296,7 +296,7 @@ mod tests {
     fn test_group_channel_job_dispatcher() {
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let pool_signature = "Stratum v2 SRI Pool".to_string();
         let mut jobs_creators = JobsCreators::new(32);

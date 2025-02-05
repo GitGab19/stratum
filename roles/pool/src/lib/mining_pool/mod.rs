@@ -29,7 +29,7 @@ use std::{
     sync::Arc,
 };
 use stratum_common::{
-    bitcoin::{Script, TxOut},
+    bitcoin::{ScriptBuf, TxOut},
     secp256k1,
 };
 use tokio::{net::TcpListener, task};
@@ -48,7 +48,7 @@ pub fn get_coinbase_output(config: &Configuration) -> Result<Vec<TxOut>, Error> 
     let mut result = Vec::new();
     for coinbase_output_pool in &config.coinbase_outputs {
         let coinbase_output: CoinbaseOutput_ = coinbase_output_pool.try_into()?;
-        let output_script: Script = coinbase_output.try_into()?;
+        let output_script: ScriptBuf = coinbase_output.try_into()?;
         result.push(TxOut {
             value: 0,
             script_pubkey: output_script,
@@ -739,7 +739,7 @@ mod test {
 
     use stratum_common::{
         bitcoin,
-        bitcoin::{util::psbt::serialize::Serialize, Transaction, Witness},
+        bitcoin::{psbt::serialize::Serialize, Transaction, Witness},
     };
 
     use super::Configuration;
@@ -801,7 +801,7 @@ mod test {
         };
         let coinbase = bitcoin::Transaction {
             version: coinbase_tx_version,
-            lock_time: bitcoin::PackedLockTime(coinbase_tx_locktime),
+            lock_time: bitcoin::LockTime(coinbase_tx_locktime),
             input: vec![tx_in],
             output: coinbase_tx_outputs,
         };

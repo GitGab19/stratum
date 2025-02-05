@@ -536,7 +536,7 @@ mod test {
     use super::*;
     use async_channel::bounded;
 
-    use stratum_common::bitcoin::util::psbt::serialize::Serialize;
+    use stratum_common::bitcoin::psbt::serialize::Serialize;
 
     pub mod test_utils {
         use super::*;
@@ -629,7 +629,7 @@ mod test {
                 };
                 let tx = bitcoin::Transaction {
                     version: 1,
-                    lock_time: bitcoin::PackedLockTime(0),
+                    lock_time: bitcoin::LockTime(0),
                     input: vec![in_],
                     output: vec![],
                 };

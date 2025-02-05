@@ -6,7 +6,7 @@ use roles_logic_sv2::{
 use std::{fmt, sync::PoisonError};
 use v1::server_to_client::{Notify, SetDifficulty};
 
-use stratum_common::bitcoin::util::uint::ParseLengthError;
+use stratum_common::bitcoin::uint::ParseLengthError;
 
 pub type ProxyResult<'a, T> = core::result::Result<T, Error<'a>>;
 

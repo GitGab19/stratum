@@ -18,7 +18,7 @@ use stratum_common::{
             witness::Witness,
         },
         consensus::Decodable,
-        util::psbt::serialize::{Deserialize, Serialize},
+        psbt::serialize::{Deserialize, Serialize},
     },
 };
 
@@ -352,7 +352,7 @@ fn coinbase(
     };
     Transaction {
         version,
-        lock_time: bitcoin::PackedLockTime(lock_time),
+        lock_time: bitcoin::LockTime(lock_time),
         input: vec![tx_in],
         output: coinbase_outputs.to_vec(),
     }
@@ -543,7 +543,7 @@ pub mod tests {
     }
 
     #[cfg(feature = "prop_test")]
-    use stratum_common::bitcoin::Script;
+    use stratum_common::bitcoin::ScriptBuf;
 
     // Test job_id_from_template
     #[cfg(feature = "prop_test")]
@@ -558,7 +558,7 @@ pub mod tests {
         };
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 
@@ -581,7 +581,7 @@ pub mod tests {
     fn test_reset_new_template(mut template: NewTemplate<'static>) {
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 
@@ -617,7 +617,7 @@ pub mod tests {
     fn test_on_new_prev_hash(mut template: NewTemplate<'static>) {
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 

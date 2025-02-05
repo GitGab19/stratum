@@ -12,7 +12,7 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use stratum_common::bitcoin::util::uint::Uint256;
+use stratum_common::bitcoin::uint::Uint256;
 use v1::{
     client_to_server,
     error::Error,

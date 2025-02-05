@@ -33,7 +33,7 @@ use roles_logic_sv2::{
 };
 use std::time::Instant;
 use stratum_common::bitcoin::{
-    blockdata::block::BlockHeader, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
+    blockdata::block::BlockHeader, hash_types::BlockHash, hashes::Hash, uint::Uint256,
 };
 use tracing::{error, info};
 

@@ -4,7 +4,7 @@ use stratum_common::bitcoin::{
     blockdata::block::BlockHeader,
     hash_types::{BlockHash, TxMerkleNode},
     hashes::{sha256d::Hash as DHash, Hash},
-    util::uint::Uint256,
+    uint::Uint256,
 };
 use tracing::info;
 

@@ -27,11 +27,13 @@ use tracing::{debug, error, info, trace, warn};
 use stratum_common::{
     bitcoin,
     bitcoin::{
+        block::Header,
         hash_types,
-        hashes::{hex::ToHex, sha256d::Hash, Hash as Hash_},
+        hashes::{sha256d::Hash, Hash as Hash_},
         TxOut,
     },
 };
+use hex::prelude::*;
 
 /// A stripped type of `SetCustomMiningJob` without the (`channel_id, `request_id` and `token`)
 /// fields
@@ -832,7 +834,7 @@ impl ChannelFactory {
             Share::Standard(share) => share.0.version as i32,
         };
 
-        let header = bitcoin::blockdata::block::BlockHeader {
+        let header = Header {
             version,
             prev_blockhash,
             merkle_root: Hash::from_inner(merkle_root).into(),
@@ -851,14 +853,14 @@ impl ChannelFactory {
             let bitcoin_target_log: binary_sv2::U256 = bitcoin_target.clone().into();
             let mut bitcoin_target_log = bitcoin_target_log.to_vec();
             bitcoin_target_log.reverse();
-            debug!("Bitcoin target : {:?}", bitcoin_target_log.to_hex());
+            debug!("Bitcoin target : {:?}", bitcoin_target_log.as_hex());
             let upstream_target: binary_sv2::U256 = upstream_target.clone().into();
             let mut upstream_target = upstream_target.to_vec();
             upstream_target.reverse();
-            debug!("Upstream target: {:?}", upstream_target.to_vec().to_hex());
+            debug!("Upstream target: {:?}", upstream_target.to_vec().as_hex());
             let mut hash = hash;
             hash.reverse();
-            debug!("Hash           : {:?}", hash.to_vec().to_hex());
+            debug!("Hash           : {:?}", hash.to_vec().as_hex());
         }
         let hash: Target = hash.into();
 

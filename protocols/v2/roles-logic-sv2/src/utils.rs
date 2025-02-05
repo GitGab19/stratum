@@ -14,21 +14,24 @@ use std::{
 
 use binary_sv2::{Seq064K, ShortTxId, U256};
 use bitcoin::Block;
+use serde::de::IntoDeserializer;
 use job_declaration_sv2::{DeclareMiningJob, SubmitSolutionJd};
 use siphasher::sip::SipHasher24;
 use stratum_common::{
     bitcoin,
     bitcoin::{
-        blockdata::block::BlockHeader,
+        block::{Header, Version},
         hash_types::{BlockHash, TxMerkleNode},
         hashes::{sha256, sha256d::Hash as DHash, Hash},
         secp256k1::{All, Secp256k1},
-        util::{
-            psbt::serialize::Deserialize,
+        blockdata::constants::CompactTarget,
+        consensus,
+        {
+            psbt::serialize,
             uint::{Uint128, Uint256},
             BitArray,
         },
-        PublicKey, Script, Transaction, XOnlyPublicKey,
+        PublicKey, ScriptBuf, Transaction, XOnlyPublicKey,
     },
 };
 use tracing::error;
@@ -182,7 +185,7 @@ pub fn merkle_root_from_path<T: AsRef<[u8]>>(
     coinbase.extend_from_slice(coinbase_tx_prefix);
     coinbase.extend_from_slice(extranonce);
     coinbase.extend_from_slice(coinbase_tx_suffix);
-    let coinbase = match Transaction::deserialize(&coinbase[..]) {
+    let coinbase = match consensus::deserialize(&coinbase[..]) {
         Ok(trans) => trans,
         Err(e) => {
             error!("ERROR: {}", e);
@@ -190,7 +193,7 @@ pub fn merkle_root_from_path<T: AsRef<[u8]>>(
         }
     };
 
-    let coinbase_id: [u8; 32] = match coinbase.txid().to_vec().try_into() {
+    let coinbase_id: [u8; 32] = match coinbase.compute_txid().as_ref().try_into() {
         Ok(id) => id,
         Err(_e) => return None,
     };
@@ -256,46 +259,47 @@ pub struct CoinbaseOutput {
     pub output_script_value: String,
 }
 
-impl TryFrom<CoinbaseOutput> for Script {
+impl TryFrom<CoinbaseOutput> for ScriptBuf {
     type Error = Error;
-
     fn try_from(value: CoinbaseOutput) -> Result<Self, Self::Error> {
         match value.output_script_type.as_str() {
             "TEST" => {
                 let pub_key_hash = PublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?
                     .pubkey_hash();
-                Ok(Script::new_p2pkh(&pub_key_hash))
+                Ok(ScriptBuf::new_p2pkh(&pub_key_hash))
             }
             "P2PK" => {
                 let pub_key = PublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?;
-                Ok(Script::new_p2pk(&pub_key))
+                Ok(ScriptBuf::new_p2pk(&pub_key))
             }
             "P2PKH" => {
                 let pub_key_hash = PublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?
                     .pubkey_hash();
-                Ok(Script::new_p2pkh(&pub_key_hash))
+                Ok(ScriptBuf::new_p2pkh(&pub_key_hash))
             }
             "P2WPKH" => {
                 let w_pub_key_hash = PublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?
                     .wpubkey_hash()
                     .unwrap();
-                Ok(Script::new_v0_p2wpkh(&w_pub_key_hash))
+                Ok(ScriptBuf::new_p2wpkh(&w_pub_key_hash))
             }
             "P2SH" => {
-                let script_hashed = Script::from_str(&value.output_script_value)
+                let script_hashed = value.output_script_value
+                    .parse::<bitcoin::Script>()
                     .map_err(|_| Error::InvalidOutputScript)?
                     .script_hash();
-                Ok(Script::new_p2sh(&script_hashed))
+                Ok(ScriptBuf::new_p2sh(&script_hashed))
             }
             "P2WSH" => {
-                let w_script_hashed = Script::from_str(&value.output_script_value)
+                let w_script_hashed = value.output_script_value
+                    .parse::<bitcoin::Script>()
                     .map_err(|_| Error::InvalidOutputScript)?
                     .wscript_hash();
-                Ok(Script::new_v0_p2wsh(&w_script_hashed))
+                Ok(ScriptBuf::new_p2wsh(&w_script_hashed))
             }
             "P2TR" => {
                 // From the bip
@@ -305,7 +309,7 @@ impl TryFrom<CoinbaseOutput> for Script {
                 // and zero or more general conditions encoded in scripts organized in a tree.
                 let pub_key = XOnlyPublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?;
-                Ok(Script::new_v1_p2tr::<All>(
+                Ok(ScriptBuf::new_p2tr::<All>(
                     &Secp256k1::<All>::new(),
                     pub_key,
                     None,
@@ -406,12 +410,12 @@ pub fn hash_rate_to_target(
 
     // We calculate the numerator: 2^256-sh
     let two_to_256_minus_one = [255_u8; 32];
-    let two_to_256_minus_one = bitcoin::util::uint::Uint256::from_be_bytes(two_to_256_minus_one);
+    let two_to_256_minus_one = bitcoin::U256::from_be_bytes(two_to_256_minus_one);
 
     let mut h_times_s_array = [0u8; 32];
     h_times_s_array[16..].copy_from_slice(&h_times_s.to_be_bytes());
     let numerator =
-        two_to_256_minus_one - bitcoin::util::uint::Uint256::from_be_bytes(h_times_s_array);
+        two_to_256_minus_one - bitcoin::uint::Uint256::from_be_bytes(h_times_s_array);
 
     let mut target = numerator.div(denominator).to_be_bytes();
     target.reverse();
@@ -447,19 +451,20 @@ pub fn hash_rate_from_target(target: U256<'static>, share_per_min: f64) -> Resul
     }
 
     let mut target_arr: [u8; 32] = [0; 32];
-    target_arr.as_mut().copy_from_slice(target.inner_as_ref());
+    let inner: &[u8; 32] = target.inner_as_ref().try_into().unwrap();
+    target_arr.copy_from_slice(inner);
     target_arr.reverse();
     let target = Uint256::from_be_bytes(target_arr);
 
     // we calculate the numerator 2^256-t
-    // note that [255_u8,;32] actually is 2^256 -1, but 2^256 -t = (2^256-1) - (t-1)
+    // note that [255_u8;32] actually is 2^256 -1, but 2^256 -t = (2^256-1) - (t-1)
     let max_target = [255_u8; 32];
     let max_target = Uint256::from_be_bytes(max_target);
     let numerator = max_target - (target - Uint256::one());
 
     // now we calculate the denominator s(t+1)
     // *100 here to move the fractional bit up so we can make this an int later
-    let shares_occurrency_frequence = 60_f64 / (share_per_min) * 100.0;
+    let shares_occurrency_frequence = 60_f64 / share_per_min * 100.0;
     // note that t+1 cannot be zero because t unsigned. Therefore the denominator is zero if and
     // only if s is zero.
     let shares_occurrency_frequence = shares_occurrency_frequence as u128;
@@ -789,8 +794,8 @@ fn test_merkle_root_from_path() {
 /// Converts a `u256` to a [`BlockHash`] type.
 pub fn u256_to_block_hash(v: U256<'static>) -> BlockHash {
     let hash: [u8; 32] = v.to_vec().try_into().unwrap();
-    let hash = Hash::from_inner(hash);
-    BlockHash::from_hash(hash)
+    let dhash = DHash::from_slice(&hash).unwrap();
+    BlockHash::from_raw_hash(dhash)
 }
 
 // Returns a new `BlockHeader`.
@@ -810,7 +815,7 @@ pub(crate) fn new_header(
     time: u32,
     bits: u32,
     nonce: u32,
-) -> Result<BlockHeader, Error> {
+) -> Result<Header, Error> {
     if prev_hash.len() != 32 {
         return Err(Error::ExpectedLen32(prev_hash.len()));
     }
@@ -819,18 +824,20 @@ pub(crate) fn new_header(
     }
     let mut prev_hash_arr = [0u8; 32];
     prev_hash_arr.copy_from_slice(prev_hash);
-    let prev_hash = DHash::from_inner(prev_hash_arr);
+    let prev_hash_dhash = DHash::from_slice(&prev_hash_arr).unwrap();
+    let prev_hash = BlockHash::from_raw_hash(prev_hash_dhash);
 
     let mut merkle_root_arr = [0u8; 32];
     merkle_root_arr.copy_from_slice(merkle_root);
-    let merkle_root = DHash::from_inner(merkle_root_arr);
+    let merkle_root_dhash = DHash::from_slice(&merkle_root_arr).unwrap();
+    let merkle_root = TxMerkleNode::from_raw_hash(merkle_root_dhash);
 
-    Ok(BlockHeader {
-        version,
-        prev_blockhash: BlockHash::from_hash(prev_hash),
-        merkle_root: TxMerkleNode::from_hash(merkle_root),
+    Ok(Header {
+        version: Version(version as i32),
+        prev_blockhash: prev_hash,
+        merkle_root,
         time,
-        bits,
+        bits: CompactTarget::from_bits(bits),
         nonce,
     })
 }
@@ -845,10 +852,10 @@ pub(crate) fn new_header(
 // `bits`        BE
 // `nonce`       BE
 #[allow(dead_code)]
-pub(crate) fn new_header_hash<'decoder>(header: BlockHeader) -> U256<'decoder> {
-    let hash = header.block_hash().to_vec();
+pub(crate) fn new_header_hash<'decoder>(header: Header) -> U256<'decoder> {
+    let hash_vec: Vec<u8> = <DHash as AsRef<[u8; 32]>>::as_ref(header.block_hash().as_raw_hash()).to_vec();
     // below never panic an header hash is always U256
-    hash.try_into().unwrap()
+    hash_vec.try_into().unwrap()
 }
 
 fn u128_as_u256(v: u128) -> Uint256 {
@@ -887,30 +894,27 @@ pub fn get_target(
     merkle_path: Vec<Vec<u8>>,
     nbits: u32,
 ) -> [u8; 32] {
-    let merkle_root: [u8; 32] = merkle_root_from_path(
+    let merkle_root_bytes: [u8; 32] = merkle_root_from_path(
         coinbase_tx_prefix,
         coinbase_tx_suffix,
         extranonce,
-        &(merkle_path[..]),
+        &merkle_path[..],
     )
-    .unwrap()
-    .try_into()
-    .unwrap();
-    let merkle_root = Hash::from_inner(merkle_root);
-    let merkle_root = TxMerkleNode::from_hash(merkle_root);
-    // TODO  how should version be transoformed from u32 into i32???
-    let version = version as i32;
-    let header = BlockHeader {
-        version,
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let d_hash = DHash::from_slice(&merkle_root_bytes).unwrap();
+    let merkle_root = TxMerkleNode::from_raw_hash(d_hash);
+    let header = Header {
+        version: Version(version as i32),
         prev_blockhash: prev_hash,
         merkle_root,
         time: ntime,
-        bits: nbits,
+        bits: CompactTarget::from_bits(nbits),
         nonce,
     };
-
     let hash_ = header.block_hash();
-    let mut hash = hash_.as_hash().into_inner();
+    let mut hash: [u8; 32] = <DHash as AsRef<[u8; 32]>>::as_ref(hash_.as_raw_hash()).clone();
     hash.reverse();
     hash
 }
@@ -930,7 +934,7 @@ pub fn hash_lists_tuple(
 ) -> (Seq064K<'static, ShortTxId<'static>>, U256<'static>) {
     let mut txid_list: Vec<bitcoin::Txid> = Vec::new();
     for tx in tx_data {
-        txid_list.push(tx.txid());
+        txid_list.push(tx.compute_txid());
     }
     let mut tx_short_hash_list_: Vec<ShortTxId> = Vec::new();
     for txid in txid_list.clone() {
@@ -956,9 +960,9 @@ pub fn get_short_hash(txid: bitcoin::Txid, tx_short_hash_nonce: u64) -> ShortTxI
     // take first two integers from the hash
     let k0 = u64::from_le_bytes(nonce_hash[0..8].try_into().unwrap());
     let k1 = u64::from_le_bytes(nonce_hash[8..16].try_into().unwrap());
-    // get every transaction, hash it, remove first two bytes and push the ShortTxId in a vector
+    // create hasher with keys
     let hasher = SipHasher24::new_with_keys(k0, k1);
-    let tx_hashed = hasher.hash(&txid);
+    let tx_hashed = hasher.hash(txid.as_ref());
     let tx_hashed_bytes: Vec<u8> = tx_hashed.to_le_bytes()[2..].to_vec();
     let short_tx_id: ShortTxId = tx_hashed_bytes.try_into().unwrap();
     short_tx_id
@@ -973,11 +977,11 @@ fn tx_hash_list_hash_builder(txid_list: Vec<bitcoin::Txid>) -> U256<'static> {
     // the full coinbase is known
     let mut vec_u8 = vec![];
     for txid in txid_list {
-        let txid_as_byte_array: &[u8; 32] = &txid.as_inner().clone();
+        let txid_as_byte_array: &[u8; 32] = txid.as_ref();
         vec_u8.extend_from_slice(txid_as_byte_array);
     }
-    let hash = sha256::Hash::hash(&vec_u8).as_inner().to_owned();
-    hash.to_vec().try_into().unwrap()
+    let hash_bytes: [u8; 32] = <sha256::Hash as Hash>::into_inner(Hash::hash(&vec_u8));
+    hash_bytes.to_vec().try_into().unwrap()
 }
 
 /// Creates a block from a solution submission.
@@ -1024,27 +1028,28 @@ impl<'a> From<BlockCreator<'a>> for bitcoin::Block {
         let coinbase_suf = last_declare.coinbase_suffix.to_vec();
         let mut path: Vec<Vec<u8>> = vec![];
         for tx in &tx_list {
-            let id = tx.txid();
-            let id = id.as_ref().to_vec();
+            let id = tx.compute_txid();
+            let id = <bitcoin::Txid as AsRef<[u8; 32]>>::as_ref(&id).to_vec();
             path.push(id);
         }
         let merkle_root =
             merkle_root_from_path(&coinbase_pre[..], &coinbase_suf[..], &extranonce[..], &path)
                 .expect("Invalid coinbase");
-        let merkle_root = Hash::from_inner(merkle_root.try_into().unwrap());
+        let merkle_root_hash = DHash::from(merkle_root.try_into().unwrap());
+        let merkle_root: TxMerkleNode = merkle_root_hash.into();
 
         let prev_blockhash = u256_to_block_hash(message.prev_hash.into_static());
-        let header = stratum_common::bitcoin::blockdata::block::BlockHeader {
-            version: message.version as i32,
+        let header = Header {
+            version: Version(message.version as i32),
             prev_blockhash,
             merkle_root,
             time: message.ntime,
-            bits: message.nbits,
+            bits: CompactTarget::from_bits(message.nbits),
             nonce: message.nonce,
         };
 
         let coinbase = [coinbase_pre, extranonce, coinbase_suf].concat();
-        let coinbase = Transaction::deserialize(&coinbase[..]).unwrap();
+        let coinbase = consensus::deserialize(&coinbase[..]).unwrap();
         tx_list.insert(0, coinbase);
 
         let mut block = Block {
@@ -1276,7 +1281,7 @@ mod tests {
         let hrs = hr * 60.0; // number of hashes in 1 minute
         let mut target = hash_rate_to_target(hr, 1.0).unwrap().to_vec();
         target.reverse();
-        let target = bitcoin::util::uint::Uint256::from_be_slice(&target[..]).unwrap();
+        let target = bitcoin::uint::Uint256::from_be_slice(&target[..]).unwrap();
 
         let mut i: i64 = 0;
         let mut results = vec![];
@@ -1288,7 +1293,7 @@ mod tests {
             let b = b.to_be_bytes();
             let concat = [&a[..], &b[..]].concat().to_vec();
             i += 1;
-            if bitcoin::util::uint::Uint256::from_be_slice(&concat[..]).unwrap() <= target {
+            if bitcoin::uint::Uint256::from_be_slice(&concat[..]).unwrap() <= target {
                 results.push(i);
                 i = 0;
                 successes += 1;
