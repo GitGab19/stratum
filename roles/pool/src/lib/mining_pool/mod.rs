@@ -29,7 +29,7 @@ use std::{
     sync::Arc,
 };
 use stratum_common::{
-    bitcoin::{Script, TxOut},
+    bitcoin::{ScriptBuf, TxOut},
     secp256k1,
 };
 use tokio::{net::TcpListener, task};
@@ -48,7 +48,7 @@ pub fn get_coinbase_output(config: &Configuration) -> Result<Vec<TxOut>, Error> 
     let mut result = Vec::new();
     for coinbase_output_pool in &config.coinbase_outputs {
         let coinbase_output: CoinbaseOutput_ = coinbase_output_pool.try_into()?;
-        let output_script: Script = coinbase_output.try_into()?;
+        let output_script: ScriptBuf = coinbase_output.try_into()?;
         result.push(TxOut {
             value: 0,
             script_pubkey: output_script,
@@ -739,7 +739,7 @@ mod test {
 
     use stratum_common::{
         bitcoin,
-        bitcoin::{util::psbt::serialize::Serialize, Transaction, Witness},
+        bitcoin::{consensus, Transaction, Witness},
     };
 
     use super::Configuration;
@@ -839,7 +839,7 @@ mod test {
 
     // copied from roles-logic-sv2::job_creator
     fn coinbase_tx_prefix(coinbase: &Transaction, script_prefix_len: usize) -> B064K<'static> {
-        let encoded = coinbase.serialize();
+        let encoded = consensus::encode::serialize(coinbase);
         // If script_prefix_len is not 0 we are not in a test enviornment and the coinbase have the
         // 0 witness
         let segwit_bytes = match script_prefix_len {

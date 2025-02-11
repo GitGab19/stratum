@@ -17,8 +17,7 @@ use stratum_common::{
             transaction::{OutPoint, Transaction, TxIn, TxOut},
             witness::Witness,
         },
-        consensus::Decodable,
-        util::psbt::serialize::{Deserialize, Serialize},
+        consensus,
     },
 };
 
@@ -246,7 +245,7 @@ fn coinbase_tx_prefix(
     coinbase: &Transaction,
     script_prefix_len: usize,
 ) -> Result<B064K<'static>, Error> {
-    let encoded = coinbase.serialize();
+    let encoded = consensus::serialize(coinbase);
     // If script_prefix_len is not 0 we are not in a test environment and the coinbase will have the
     // 0 witness
     let segwit_bytes = match script_prefix_len {
@@ -271,7 +270,7 @@ fn coinbase_tx_suffix(
     extranonce_len: u8,
     script_prefix_len: usize,
 ) -> Result<B064K<'static>, Error> {
-    let encoded = coinbase.serialize();
+    let encoded = consensus::serialize(coinbase);
     // If script_prefix_len is not 0 we are not in a test environment and the coinbase have the 0
     // witness
     let segwit_bytes = match script_prefix_len {
@@ -370,7 +369,7 @@ pub fn extended_job_to_non_segwit(
     let extranonce = vec![0_u8; full_extranonce_len];
     encoded.extend_from_slice(&extranonce[..]);
     encoded.extend_from_slice(job.coinbase_tx_suffix.inner_as_ref());
-    let coinbase = Transaction::deserialize(&encoded).map_err(|_| Error::InvalidCoinbase)?;
+    let coinbase = consensus::deserialize(&encoded).map_err(|_| Error::InvalidCoinbase)?;
     let stripped_tx = StrippedCoinbaseTx::from_coinbase(coinbase, full_extranonce_len)?;
 
     Ok(NewExtendedMiningJob {
@@ -420,7 +419,7 @@ impl StrippedCoinbaseTx {
                     ser
                 })
                 .collect(),
-            outputs: tx.output.iter().map(|o| o.serialize()).collect(),
+            outputs: tx.output.iter().map(|o| consensus::encode::serialize(o)).collect(),
             lock_time: tx.lock_time.into(),
             bip141_bytes_len,
         })
@@ -543,7 +542,7 @@ pub mod tests {
     }
 
     #[cfg(feature = "prop_test")]
-    use stratum_common::bitcoin::Script;
+    use stratum_common::bitcoin::ScriptBuf;
 
     // Test job_id_from_template
     #[cfg(feature = "prop_test")]
@@ -558,7 +557,7 @@ pub mod tests {
         };
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 
@@ -581,7 +580,7 @@ pub mod tests {
     fn test_reset_new_template(mut template: NewTemplate<'static>) {
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 
@@ -617,7 +616,7 @@ pub mod tests {
     fn test_on_new_prev_hash(mut template: NewTemplate<'static>) {
         let out = TxOut {
             value: BLOCK_REWARD,
-            script_pubkey: Script::new_p2pk(&new_pub_key()),
+            script_pubkey: ScriptBuf::new_p2pk(&new_pub_key()),
         };
         let mut jobs_creators = JobsCreators::new(32);
 
@@ -704,7 +703,7 @@ pub mod tests {
             235, 216, 54, 151, 78, 140, 249, 1, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
-        let coinbase = Transaction::deserialize(encoded).unwrap();
+        let coinbase = consensus::deserialize(encoded).unwrap();
         let stripped = StrippedCoinbaseTx::from_coinbase(coinbase.clone(), 32).unwrap();
         let prefix = stripped.into_coinbase_tx_prefix().unwrap().to_vec();
         let suffix = stripped.into_coinbase_tx_suffix().unwrap().to_vec();
@@ -751,6 +750,6 @@ pub mod tests {
         //     i+=1;
         // }
         // println!("SIZE: {:?}", i);
-        Transaction::deserialize(&encoded_clone).unwrap();
+        consensus::encode::deserialize(&encoded_clone).unwrap();
     }
 }
