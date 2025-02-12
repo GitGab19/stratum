@@ -184,10 +184,8 @@ pub fn merkle_root_from_path<T: AsRef<[u8]>>(
         }
     };
 
-    let coinbase_id: [u8; 32] = match coinbase.txid().to_vec().try_into() {
-        Ok(id) => id,
-        Err(_e) => return None,
-    };
+    let coinbase_id: [u8; 32] = *coinbase.compute_txid().as_ref();
+
     Some(merkle_root_from_path_(coinbase_id, path).to_vec())
 }
 
@@ -917,7 +915,7 @@ pub fn hash_lists_tuple(
 ) -> (Seq064K<'static, ShortTxId<'static>>, U256<'static>) {
     let mut txid_list: Vec<bitcoin::Txid> = Vec::new();
     for tx in tx_data {
-        txid_list.push(tx.txid());
+        txid_list.push(tx.compute_txid());
     }
     let mut tx_short_hash_list_: Vec<ShortTxId> = Vec::new();
     for txid in txid_list.clone() {
@@ -945,7 +943,7 @@ pub fn get_short_hash(txid: bitcoin::Txid, tx_short_hash_nonce: u64) -> ShortTxI
     let k1 = u64::from_le_bytes(nonce_hash[8..16].try_into().unwrap());
     // get every transaction, hash it, remove first two bytes and push the ShortTxId in a vector
     let hasher = SipHasher24::new_with_keys(k0, k1);
-    let tx_hashed = hasher.hash(&txid);
+    let tx_hashed = hasher.hash((&txid).as_ref());
     let tx_hashed_bytes: Vec<u8> = tx_hashed.to_le_bytes()[2..].to_vec();
     let short_tx_id: ShortTxId = tx_hashed_bytes.try_into().unwrap();
     short_tx_id
@@ -960,7 +958,7 @@ fn tx_hash_list_hash_builder(txid_list: Vec<bitcoin::Txid>) -> U256<'static> {
     // the full coinbase is known
     let mut vec_u8 = vec![];
     for txid in txid_list {
-        let txid_as_byte_array: &[u8; 32] = &txid.as_inner().clone();
+        let txid_as_byte_array: &[u8; 32] = &txid.as_ref();
         vec_u8.extend_from_slice(txid_as_byte_array);
     }
     let hash = sha256::Hash::hash(&vec_u8).as_inner().to_owned();
@@ -1011,9 +1009,9 @@ impl<'a> From<BlockCreator<'a>> for bitcoin::Block {
         let coinbase_suf = last_declare.coinbase_suffix.to_vec();
         let mut path: Vec<Vec<u8>> = vec![];
         for tx in &tx_list {
-            let id = tx.txid();
-            let id = id.as_ref().to_vec();
-            path.push(id);
+            let id = tx.compute_txid();
+            let id_bytes: &[u8; 32] = id.as_ref();
+            path.push(id_bytes.to_vec());
         }
         let merkle_root =
             merkle_root_from_path(&coinbase_pre[..], &coinbase_suf[..], &extranonce[..], &path)

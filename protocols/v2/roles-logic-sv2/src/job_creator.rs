@@ -411,7 +411,7 @@ impl StrippedCoinbaseTx {
                 .iter()
                 .map(|txin| {
                     let mut ser: Vec<u8> = vec![];
-                    ser.extend_from_slice(&txin.previous_output.txid);
+                    ser.extend_from_slice((&txin.previous_output.txid).as_ref());
                     ser.extend_from_slice(&txin.previous_output.vout.to_le_bytes());
                     ser.push(txin.script_sig.len() as u8);
                     ser.extend_from_slice(txin.script_sig.as_bytes());

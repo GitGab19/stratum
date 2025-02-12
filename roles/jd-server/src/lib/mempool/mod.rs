@@ -84,7 +84,7 @@ impl JDsMempool {
                     .map_err(JdsMempoolError::Rpc)?;
                 let _ = self_.safe_lock(|a| {
                     a.mempool
-                        .entry(transaction.txid())
+                        .entry(transaction.compute_txid())
                         .and_modify(|entry| {
                             if let Some((_, count)) = entry {
                                 *count += 1;
@@ -101,7 +101,7 @@ impl JDsMempool {
         for transaction in transactions {
             let _ = self_.safe_lock(|a| {
                 a.mempool
-                    .entry(transaction.txid())
+                    .entry(transaction.compute_txid())
                     .and_modify(|entry| {
                         if let Some((_, count)) = entry {
                             *count += 1;
