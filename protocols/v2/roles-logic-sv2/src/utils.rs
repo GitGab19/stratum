@@ -20,6 +20,8 @@ use stratum_common::{
         secp256k1::{All, Secp256k1},
         pow::CompactTarget,
         consensus,
+        ScriptHash,
+        WScriptHash,
         PublicKey, ScriptBuf, Transaction, XOnlyPublicKey,
     },
 };
@@ -279,15 +281,13 @@ impl TryFrom<CoinbaseOutput> for ScriptBuf {
                 Ok(ScriptBuf::new_p2wpkh(&w_pub_key_hash))
             }
             "P2SH" => {
-                let script_hashed = ScriptBuf::from_str(value.output_script_value.into())
-                    .map_err(|_| Error::InvalidOutputScript)?
-                    .script_hash();
+                let script_hashed = ScriptHash::from_str(value.output_script_value.as_ref())
+                    .map_err(|_| Error::InvalidOutputScript)?;
                 Ok(ScriptBuf::new_p2sh(&script_hashed))
             }
             "P2WSH" => {
-                let w_script_hashed = ScriptBuf::from_str(value.output_script_value.into())
-                    .map_err(|_| Error::InvalidOutputScript)?
-                    .wscript_hash();
+                let w_script_hashed = WScriptHash::from_str(value.output_script_value.as_ref())
+                    .map_err(|_| Error::InvalidOutputScript)?;
                 Ok(ScriptBuf::new_p2wsh(&w_script_hashed))
             }
             "P2TR" => {
@@ -298,7 +298,7 @@ impl TryFrom<CoinbaseOutput> for ScriptBuf {
                 // and zero or more general conditions encoded in scripts organized in a tree.
                 let pub_key = XOnlyPublicKey::from_str(&value.output_script_value)
                     .map_err(|_| Error::InvalidOutputScript)?;
-                Ok(ScriptBuf::new_v1_p2tr::<All>(
+                Ok(ScriptBuf::new_p2tr::<All>(
                     &Secp256k1::<All>::new(),
                     pub_key,
                     None,
