@@ -33,7 +33,7 @@ use roles_logic_sv2::{
 };
 use std::time::Instant;
 use stratum_common::bitcoin::{
-    blockdata::block::BlockHeader, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
+    blockdata::block::Header, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
 };
 use tracing::{error, info};
 
@@ -534,7 +534,7 @@ impl ParseUpstreamMiningMessages<(), NullDownstreamMiningSelector, NoRouting> fo
 
 #[derive(Debug, Clone)]
 struct Miner {
-    header: Option<BlockHeader>,
+    header: Option<Header>,
     target: Option<Uint256>,
     job_id: Option<u32>,
     version: Option<u32>,
@@ -571,7 +571,7 @@ impl Miner {
         let merkle_root = Hash::from_inner(merkle_root);
         // fields need to be added as BE and the are converted to LE in the background before
         // hashing
-        let header = BlockHeader {
+        let header = Header {
             version: new_job.version as i32,
             prev_blockhash: BlockHash::from_hash(prev_hash),
             merkle_root,
@@ -627,7 +627,7 @@ fn measure_hashrate(duration_secs: u64, handicap: u32) -> f64 {
     // per unit of time we can do
     let merkle_root: [u8; 32] = generate_random_32_byte_array().to_vec().try_into().unwrap();
     let merkle_root = Hash::from_inner(merkle_root);
-    let header = BlockHeader {
+    let header = Header {
         version: rng.gen(),
         prev_blockhash: BlockHash::from_hash(prev_hash),
         merkle_root,

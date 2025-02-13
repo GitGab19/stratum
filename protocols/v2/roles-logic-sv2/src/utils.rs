@@ -14,10 +14,11 @@ use siphasher::sip::SipHasher24;
 use stratum_common::{
     bitcoin,
     bitcoin::{
-        blockdata::block::BlockHeader,
+        blockdata::block::{Header, Version},
         hash_types::{BlockHash, TxMerkleNode},
         hashes::{sha256, sha256d::Hash as DHash, Hash},
         secp256k1::{All, Secp256k1},
+        pow::CompactTarget,
         consensus,
         PublicKey, ScriptBuf, Transaction, XOnlyPublicKey,
     },
@@ -778,7 +779,7 @@ pub fn u256_to_block_hash(v: U256<'static>) -> BlockHash {
     BlockHash::from_hash(hash)
 }
 
-// Returns a new `BlockHeader`.
+// Returns a new `Header`.
 //
 // Expected endianness inputs:
 // `version`     LE
@@ -795,7 +796,7 @@ pub(crate) fn new_header(
     time: u32,
     bits: u32,
     nonce: u32,
-) -> Result<BlockHeader, Error> {
+) -> Result<Header, Error> {
     if prev_hash.len() != 32 {
         return Err(Error::ExpectedLen32(prev_hash.len()));
     }
@@ -810,95 +811,16 @@ pub(crate) fn new_header(
     merkle_root_arr.copy_from_slice(merkle_root);
     let merkle_root = DHash::from_inner(merkle_root_arr);
 
-    Ok(BlockHeader {
-        version,
+    Ok(Header {
+        version: Version::from_consensus(version),
         prev_blockhash: BlockHash::from_hash(prev_hash),
         merkle_root: TxMerkleNode::from_hash(merkle_root),
         time,
-        bits,
+        bits: CompactTarget::from_consensus(bits),
         nonce,
     })
 }
 
-// Returns hash of the `BlockHeader`.
-//
-// Endianness reference for the correct hash:
-// `version`     LE
-// `prev_hash`   BE
-// `merkle_root` BE
-// `time`        BE
-// `bits`        BE
-// `nonce`       BE
-#[allow(dead_code)]
-pub(crate) fn new_header_hash<'decoder>(header: BlockHeader) -> U256<'decoder> {
-    let hash = header.block_hash().to_vec();
-    // below never panic an header hash is always U256
-    hash.try_into().unwrap()
-}
-
-fn u128_as_u256(v: u128) -> Uint256 {
-    let u128_min = [0_u8; 16];
-    let u128_b = v.to_be_bytes();
-    let u256 = [&u128_min[..], &u128_b[..]].concat();
-    // below never panic
-    Uint256::from_be_slice(&u256).unwrap()
-}
-
-/// TODO: Not used, to be removed.
-///
-/// target = u256_max * (shar_per_min / 60) * (2^32 / hash_per_second)
-/// target = u128_max * ((shar_per_min / 60) * (2^32 / hash_per_second) * u128_max)
-pub fn target_from_hash_rate(hash_per_second: f32, share_per_min: f32) -> U256<'static> {
-    assert!(hash_per_second >= 1000000000.0);
-    let operand = (share_per_min as f64 / 60.0) * (u32::MAX as f64 / hash_per_second as f64);
-    assert!(operand <= 1.0);
-    let operand = operand * (u128::MAX as f64);
-    let target = u128_as_u256(u128::MAX) * u128_as_u256(operand as u128);
-    let mut target: [u8; 32] = target.to_be_bytes();
-    target.reverse();
-    target.into()
-}
-
-/// TODO: Not used, to be removed.
-#[allow(clippy::too_many_arguments)]
-pub fn get_target(
-    nonce: u32,
-    version: u32,
-    ntime: u32,
-    extranonce: &[u8],
-    coinbase_tx_prefix: &[u8],
-    coinbase_tx_suffix: &[u8],
-    prev_hash: BlockHash,
-    merkle_path: Vec<Vec<u8>>,
-    nbits: u32,
-) -> [u8; 32] {
-    let merkle_root: [u8; 32] = merkle_root_from_path(
-        coinbase_tx_prefix,
-        coinbase_tx_suffix,
-        extranonce,
-        &(merkle_path[..]),
-    )
-    .unwrap()
-    .try_into()
-    .unwrap();
-    let merkle_root = Hash::from_inner(merkle_root);
-    let merkle_root = TxMerkleNode::from_hash(merkle_root);
-    // TODO  how should version be transoformed from u32 into i32???
-    let version = version as i32;
-    let header = BlockHeader {
-        version,
-        prev_blockhash: prev_hash,
-        merkle_root,
-        time: ntime,
-        bits: nbits,
-        nonce,
-    };
-
-    let hash_ = header.block_hash();
-    let mut hash = hash_.as_hash().into_inner();
-    hash.reverse();
-    hash
-}
 
 /// Generates a list of transaction short hashes and a hash of the full transaction list.
 ///
@@ -1019,12 +941,12 @@ impl<'a> From<BlockCreator<'a>> for bitcoin::Block {
         let merkle_root = Hash::from_inner(merkle_root.try_into().unwrap());
 
         let prev_blockhash = u256_to_block_hash(message.prev_hash.into_static());
-        let header = stratum_common::bitcoin::blockdata::block::BlockHeader {
-            version: message.version as i32,
+        let header = Header {
+            version: Version::from_consensus(message.version as i32),
             prev_blockhash,
             merkle_root,
             time: message.ntime,
-            bits: message.nbits,
+            bits: CompactTarget::from_consensus(message.nbits),
             nonce: message.nonce,
         };
 
@@ -1203,12 +1125,12 @@ mod tests {
         merkle_root_arr.copy_from_slice(&block.merkle_root);
         let merkle_root = DHash::from_inner(merkle_root_arr);
 
-        let expect = BlockHeader {
-            version: block.version as i32,
+        let expect = Header {
+            version: Version::from_consensus(block.version as i32),
             prev_blockhash: BlockHash::from_hash(prev_hash),
             merkle_root: TxMerkleNode::from_hash(merkle_root),
             time: block.time,
-            bits: block.nbits,
+            bits: CompactTarget::from_consensus(block.nbits),
             nonce: block.nonce,
         };
 
@@ -1223,30 +1145,6 @@ mod tests {
         )?;
         assert_eq!(actual, expect);
         Ok(())
-    }
-
-    #[test]
-
-    fn gets_new_header_hash() {
-        let block = get_test_block();
-        let expect = block.block_hash;
-        let block = get_test_block();
-        let prev_hash: [u8; 32] = block.prev_hash.to_vec().try_into().unwrap();
-        let prev_hash = DHash::from_inner(prev_hash);
-        let merkle_root: [u8; 32] = block.merkle_root.to_vec().try_into().unwrap();
-        let merkle_root = DHash::from_inner(merkle_root);
-        let header = BlockHeader {
-            version: block.version as i32,
-            prev_blockhash: BlockHash::from_hash(prev_hash),
-            merkle_root: TxMerkleNode::from_hash(merkle_root),
-            time: block.time,
-            bits: block.nbits,
-            nonce: block.nonce,
-        };
-
-        let actual = new_header_hash(header);
-
-        assert_eq!(actual, expect);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::job::Job;
 use std::convert::TryInto;
 use stratum_common::bitcoin::{
-    blockdata::block::BlockHeader,
+    blockdata::block::Header,
     hash_types::{BlockHash, TxMerkleNode},
     hashes::{sha256d::Hash as DHash, Hash},
     util::uint::Uint256,
@@ -14,7 +14,7 @@ use tracing::info;
 #[derive(Debug)]
 pub(crate) struct Miner {
     /// Mock of mined candidate block header.
-    pub(crate) header: Option<BlockHeader>,
+    pub(crate) header: Option<Header>,
     /// Current mining target.
     pub(crate) target: Option<Uint256>,
     /// ID of the job used while submitting share generated from this job.
@@ -52,7 +52,7 @@ impl Miner {
         let prev_hash = DHash::from_inner(prev_hash);
         let merkle_root: [u8; 32] = new_job.merkle_root.to_vec().try_into().unwrap();
         let merkle_root = DHash::from_inner(merkle_root);
-        let header = BlockHeader {
+        let header = Header {
             version: new_job.version as i32,
             prev_blockhash: BlockHash::from_hash(prev_hash),
             merkle_root: TxMerkleNode::from_hash(merkle_root),

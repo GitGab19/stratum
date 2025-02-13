@@ -30,6 +30,7 @@ use stratum_common::{
         hash_types,
         hashes::{hex::ToHex, sha256d::Hash, Hash as Hash_},
         TxOut,
+        block::Version,
     },
 };
 
@@ -832,8 +833,8 @@ impl ChannelFactory {
             Share::Standard(share) => share.0.version as i32,
         };
 
-        let header = bitcoin::blockdata::block::BlockHeader {
-            version,
+        let header = bitcoin::blockdata::block::Header {
+            version: Version::from_consensus(version),
             prev_blockhash,
             merkle_root: Hash::from_inner(merkle_root).into(),
             time: m.get_n_time(),
@@ -1897,7 +1898,7 @@ mod test {
     }
 
     fn nbit_to_target(nbit: u32) -> U256<'static> {
-        let mut target = bitcoin::blockdata::block::BlockHeader::u256_from_compact_target(nbit)
+        let mut target = bitcoin::blockdata::block::Header::u256_from_compact_target(nbit)
             .to_be_bytes()
             .to_vec();
         target.reverse();

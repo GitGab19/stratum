@@ -1,5 +1,5 @@
 use bitcoin::{
-    blockdata::block::BlockHeader, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
+    blockdata::block::Header, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
 };
 
 use async_channel::{Receiver, Sender};
@@ -327,7 +327,7 @@ impl ParseUpstreamMiningMessages<(), NullDownstreamMiningSelector, NoRouting> fo
 
 #[derive(Debug)]
 pub struct Miner {
-    header: Option<BlockHeader>,
+    header: Option<Header>,
     target: Option<Uint256>,
     job_id: Option<u32>,
     version: Option<u32>,
@@ -360,7 +360,7 @@ impl Miner {
         let merkle_root = Hash::from_inner(merkle_root);
         // fields need to be added as BE and the are converted to LE in the background before
         // hashing
-        let header = BlockHeader {
+        let header = Header {
             version: new_job.version as i32,
             prev_blockhash: BlockHash::from_hash(prev_hash),
             merkle_root,
