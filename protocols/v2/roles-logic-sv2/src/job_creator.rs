@@ -14,12 +14,13 @@ use stratum_common::{
     bitcoin,
     bitcoin::{
         blockdata::{
-            transaction::{OutPoint, Transaction, TxIn, TxOut},
+            transaction::{OutPoint, Transaction, TxIn, TxOut, Version},
             witness::Witness,
         },
-        consensus,
+        consensus::{Decodable},
     },
 };
+use stratum_common::bitcoin::absolute::LockTime;
 
 #[derive(Debug)]
 pub struct JobsCreators {
@@ -350,8 +351,8 @@ fn coinbase(
         witness,
     };
     Transaction {
-        version,
-        lock_time: bitcoin::PackedLockTime(lock_time),
+        version: Version::non_standard(version),
+        lock_time: LockTime::from_consensus(lock_time),
         input: vec![tx_in],
         output: coinbase_outputs.to_vec(),
     }
