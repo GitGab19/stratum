@@ -17,10 +17,12 @@ use stratum_common::{
             transaction::{OutPoint, Transaction, TxIn, TxOut, Version},
             witness::Witness,
         },
-        consensus::{Decodable},
+        consensus,
     },
 };
 use stratum_common::bitcoin::absolute::LockTime;
+use stratum_common::bitcoin::Amount;
+use stratum_common::bitcoin::consensus::Decodable;
 
 #[derive(Debug)]
 pub struct JobsCreators {
@@ -195,7 +197,7 @@ fn new_extended_job(
 ) -> Result<NewExtendedMiningJob<'static>, Error> {
     coinbase_outputs[0].value = match new_template.coinbase_tx_value_remaining.checked_mul(1) {
         //check that value_remaining is updated by TP
-        Some(result) => result,
+        Some(result) => Amount::from_sat(result),
         None => return Err(Error::ValueRemainingNotUpdated),
     };
     let tx_version = new_template
@@ -339,8 +341,8 @@ fn coinbase(
     // If script_prefix_len is not 0 we are not in a test environment and the coinbase have the 0
     // witness
     let witness = match bip34_bytes.len() {
-        0 => Witness::from_vec(vec![]),
-        _ => Witness::from_vec(vec![vec![0; 32]]),
+        0 => Witness::from(vec![] as Vec<Vec<u8>>),
+        _ => Witness::from(vec![vec![0; 32]]),
     };
     bip34_bytes.extend_from_slice(pool_signature.as_bytes());
     bip34_bytes.extend_from_slice(&vec![0; extranonce_len as usize]);
@@ -406,7 +408,7 @@ impl StrippedCoinbaseTx {
             .len()
             - full_extranonce_len;
         Ok(Self {
-            version: tx.version as u32,
+            version: tx.version.0 as u32,
             inputs: tx
                 .input
                 .iter()
@@ -421,7 +423,7 @@ impl StrippedCoinbaseTx {
                 })
                 .collect(),
             outputs: tx.output.iter().map(|o| consensus::encode::serialize(o)).collect(),
-            lock_time: tx.lock_time.into(),
+            lock_time: tx.lock_time.to_consensus_u32(),
             bip141_bytes_len,
         })
     }
