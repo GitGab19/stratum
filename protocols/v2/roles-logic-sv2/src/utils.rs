@@ -399,12 +399,12 @@ pub fn hash_rate_to_target(
 
     // We calculate the numerator: 2^256-sh
     let two_to_256_minus_one = [255_u8; 32];
-    let two_to_256_minus_one = U256Primitive::from_big_endian(*two_to_256_minus_one);
+    let two_to_256_minus_one = U256Primitive::from_big_endian(two_to_256_minus_one.as_ref());
 
     let mut h_times_s_array = [0u8; 32];
     h_times_s_array[16..].copy_from_slice(&h_times_s.to_be_bytes());
     let numerator =
-        two_to_256_minus_one - u128::from_be_bytes(h_times_s_array);
+        two_to_256_minus_one - U256Primitive::from_big_endian(h_times_s_array.as_ref());
 
     let mut target = numerator.div(denominator).to_big_endian();
     target.reverse();
@@ -440,14 +440,15 @@ pub fn hash_rate_from_target(target: U256<'static>, share_per_min: f64) -> Resul
     }
 
     let mut target_arr: [u8; 32] = [0; 32];
-    target_arr.as_mut().copy_from_slice(target.inner_as_ref());
+    let slice: &mut [u8] = &mut target_arr;
+    slice.copy_from_slice(target.inner_as_ref());
     target_arr.reverse();
-    let target = U256Primitive::from_big_endian(target_arr);
+    let target = U256Primitive::from_big_endian(target_arr.as_ref());
 
     // we calculate the numerator 2^256-t
     // note that [255_u8,;32] actually is 2^256 -1, but 2^256 -t = (2^256-1) - (t-1)
     let max_target = [255_u8; 32];
-    let max_target = U256Primitive::from_big_endian(max_target);
+    let max_target = U256Primitive::from_big_endian(max_target.as_ref());
     let numerator = max_target - (target - U256Primitive::one());
 
     // now we calculate the denominator s(t+1)
@@ -460,10 +461,10 @@ pub fn hash_rate_from_target(target: U256<'static>, share_per_min: f64) -> Resul
         return Err(Error::HashrateError(InputError::DivisionByZero));
     }
     let shares_occurrency_frequence = from_u128_to_u256(shares_occurrency_frequence);
-    let target_plus_one = U256Primitive::from_big_endian(target_arr) - U256Primitive::one();
+    let target_plus_one = U256Primitive::from_big_endian(target_arr.as_ref()) - U256Primitive::one();
     let denominator = shares_occurrency_frequence
         .mul(target_plus_one)
-        .div(U256Primitive::from_u64(100).unwrap());
+        .div(U256Primitive::from(100));
 
     let result = numerator.div(denominator).as_u128();
     // we multiply back by 100 so that it cancels with the same factor at the denominator
