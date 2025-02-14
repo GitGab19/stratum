@@ -671,11 +671,11 @@ pub mod tests {
         hash1.resize(size1 as usize + 2, 0);
         hash2.resize(size2 as usize + 2, 0);
         let tx1 = TxOut {
-            value: value1,
+            value: Amount::from_sat(value1),
             script_pubkey: hash1.into(),
         };
         let tx2 = TxOut {
-            value: value2,
+            value: Amount::from_sat(value2),
             script_pubkey: hash2.into(),
         };
         let mut encoded1 = vec![];
