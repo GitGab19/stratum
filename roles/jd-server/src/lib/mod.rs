@@ -378,7 +378,7 @@ mod tests {
         };
         let expected_script: ScriptBuf = expected_output.try_into().unwrap();
         let expected_transaction_output = TxOut {
-            value: 0,
+            value: Amount::from_sat(0),
             script_pubkey: expected_script,
         };
 
