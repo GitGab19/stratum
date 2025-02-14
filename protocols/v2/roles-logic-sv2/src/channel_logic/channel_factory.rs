@@ -1826,7 +1826,7 @@ impl ExtendedChannelKind {
 mod test {
     use super::*;
     use binary_sv2::{Seq0255, B064K, U256};
-    use bitcoin::{hash_types::WPubkeyHash, PublicKey, TxOut};
+    use stratum_common::bitcoin::{hash_types::WPubkeyHash, PublicKey, TxOut};
     use mining_sv2::OpenStandardMiningChannel;
 
     const BLOCK_REWARD: u64 = 2_000_000_000;

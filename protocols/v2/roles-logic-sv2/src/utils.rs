@@ -1119,16 +1119,16 @@ mod tests {
         }
         let mut prev_hash_arr = [0u8; 32];
         prev_hash_arr.copy_from_slice(&block.prev_hash);
-        let prev_hash = DHash::from_inner(prev_hash_arr);
+        let prev_hash = DHash::from_bytes_ref(&prev_hash_arr);
 
         let mut merkle_root_arr = [0u8; 32];
         merkle_root_arr.copy_from_slice(&block.merkle_root);
-        let merkle_root = DHash::from_inner(merkle_root_arr);
+        let merkle_root = DHash::from_bytes_ref(&merkle_root_arr);
 
         let expect = Header {
             version: Version::from_consensus(block.version as i32),
-            prev_blockhash: BlockHash::from_hash(prev_hash),
-            merkle_root: TxMerkleNode::from_hash(merkle_root),
+            prev_blockhash: BlockHash::from_raw_hash(*prev_hash),
+            merkle_root: TxMerkleNode::from_raw_hash(*merkle_root),
             time: block.time,
             bits: CompactTarget::from_consensus(block.nbits),
             nonce: block.nonce,
