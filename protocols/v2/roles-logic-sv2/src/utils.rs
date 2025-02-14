@@ -968,17 +968,11 @@ impl<'a> From<BlockCreator<'a>> for bitcoin::Block {
 mod tests {
 
     use super::{hash_rate_from_target, hash_rate_to_target, *};
-
     use binary_sv2::{Seq0255, B064K, U256};
     use rand::Rng;
-
     use serde::Deserialize;
-
     use std::convert::TryInto;
-
     use std::num::ParseIntError;
-
-    use stratum_common::bitcoin;
 
     fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
         (0..s.len())
@@ -1004,6 +998,7 @@ mod tests {
 
     #[derive(Debug)]
     struct TestBlock<'decoder> {
+        #[allow(dead_code)]
         block_hash: U256<'decoder>,
         version: u32,
         prev_hash: Vec<u8>,
@@ -1156,7 +1151,7 @@ mod tests {
         let hrs = hr * 60.0; // number of hashes in 1 minute
         let mut target = hash_rate_to_target(hr, 1.0).unwrap().to_vec();
         target.reverse();
-        let target = bitcoin::util::uint::Uint256::from_be_slice(&target[..]).unwrap();
+        let target = primitive_types::U256::from_big_endian(&target[..]);
 
         let mut i: i64 = 0;
         let mut results = vec![];
@@ -1168,7 +1163,7 @@ mod tests {
             let b = b.to_be_bytes();
             let concat = [&a[..], &b[..]].concat().to_vec();
             i += 1;
-            if bitcoin::util::uint::Uint256::from_be_slice(&concat[..]).unwrap() <= target {
+            if primitive_types::U256::from_big_endian(&concat[..]) <= target {
                 results.push(i);
                 i = 0;
                 successes += 1;

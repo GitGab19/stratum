@@ -1826,7 +1826,7 @@ impl ExtendedChannelKind {
 mod test {
     use super::*;
     use binary_sv2::{Seq0255, B064K, U256};
-    use stratum_common::bitcoin::{hash_types::WPubkeyHash, Amount, PublicKey, TxOut};
+    use stratum_common::bitcoin::{Amount, PublicKey, Target, TxOut, WPubkeyHash};
     use mining_sv2::OpenStandardMiningChannel;
 
     const BLOCK_REWARD: u64 = 2_000_000_000;
@@ -1875,7 +1875,7 @@ mod test {
         let into_bin = decode_hex(_PUB_K).unwrap();
         let pk = PublicKey::from_slice(&into_bin[..]);
         let hash = pk.unwrap().pubkey_hash();
-        WPubkeyHash::from_hash(hash.as_hash())
+        WPubkeyHash::from_raw_hash(hash.to_raw_hash())
     }
 
     fn get_coinbase() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -1899,7 +1899,7 @@ mod test {
     }
 
     fn nbit_to_target(nbit: u32) -> U256<'static> {
-        let mut target = bitcoin::blockdata::block::Header::u256_from_compact_target(nbit)
+        let mut target = Target::from_compact(CompactTarget::from_consensus(nbit))
             .to_be_bytes()
             .to_vec();
         target.reverse();
