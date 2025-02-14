@@ -741,7 +741,7 @@ mod test {
         bitcoin,
         bitcoin::{consensus, Transaction, Witness},
     };
-
+    use stratum_common::bitcoin::transaction::Version;
     use super::Configuration;
 
     // this test is used to verify the `coinbase_tx_prefix` and `coinbase_tx_suffix` values tested
@@ -789,8 +789,8 @@ mod test {
         bip34_bytes.extend_from_slice(config.pool_signature.as_bytes());
         bip34_bytes.extend_from_slice(&vec![0; extranonce_len as usize]);
         let witness = match bip34_bytes.len() {
-            0 => Witness::from_vec(vec![]),
-            _ => Witness::from_vec(vec![vec![0; 32]]),
+            0 => Witness::from(vec![] as Vec<Vec<u8>>),
+            _ => Witness::from(vec![vec![0; 32]]),
         };
 
         let tx_in = bitcoin::TxIn {
@@ -799,9 +799,9 @@ mod test {
             sequence: bitcoin::Sequence(coinbase_tx_input_sequence),
             witness,
         };
-        let coinbase = bitcoin::Transaction {
-            version: coinbase_tx_version,
-            lock_time: bitcoin::PackedLockTime(coinbase_tx_locktime),
+        let coinbase = Transaction {
+            version: Version::non_standard(coinbase_tx_version),
+            lock_time: bitcoin::absolute::LockTime::from_consensus(coinbase_tx_locktime),
             input: vec![tx_in],
             output: coinbase_tx_outputs,
         };
@@ -863,7 +863,7 @@ mod test {
         extranonce_len: u8,
         script_prefix_len: usize,
     ) -> B064K<'static> {
-        let encoded = coinbase.serialize();
+        let encoded = consensus::encode::serialize(coinbase);
         // If script_prefix_len is not 0 we are not in a test enviornment and the coinbase have the
         // 0 witness
         let segwit_bytes = match script_prefix_len {
