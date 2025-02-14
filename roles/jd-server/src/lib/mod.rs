@@ -22,7 +22,7 @@ use std::{
     convert::{TryFrom, TryInto},
     time::Duration,
 };
-use stratum_common::bitcoin::{ScriptBuf, TxOut};
+use stratum_common::bitcoin::{ScriptBuf, TxOut, Amount};
 
 pub type Message = JdsMessages<'static>;
 pub type StdFrame = StandardSv2Frame<Message>;
@@ -208,7 +208,7 @@ pub fn get_coinbase_output(config: &Configuration) -> Result<Vec<TxOut>, Error> 
         let coinbase_output: CoinbaseOutput_ = coinbase_output_pool.try_into()?;
         let output_script: ScriptBuf = coinbase_output.try_into()?;
         result.push(TxOut {
-            value: 0,
+            value: Amount::from_sat(0),
             script_pubkey: output_script,
         });
     }
