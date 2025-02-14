@@ -32,7 +32,7 @@ use roles_logic_sv2::{
     utils::Mutex,
 };
 use std::time::Instant;
-use stratum_common::bitcoin::{blockdata::block::Header, hash_types::BlockHash, hashes::Hash, util::uint::Uint256, CompactTarget};
+use stratum_common::bitcoin::{blockdata::block::Header, hash_types::BlockHash, hashes::Hash, CompactTarget};
 use tracing::{error, info};
 
 pub async fn connect(
@@ -95,6 +95,7 @@ pub type EitherFrame = StandardEitherFrame<Message>;
 
 struct SetupConnectionHandler {}
 use std::convert::TryInto;
+use primitive_types::U256;
 use stratum_common::bitcoin::block::Version;
 
 impl SetupConnectionHandler {
@@ -534,7 +535,7 @@ impl ParseUpstreamMiningMessages<(), NullDownstreamMiningSelector, NoRouting> fo
 #[derive(Debug, Clone)]
 struct Miner {
     header: Option<Header>,
-    target: Option<Uint256>,
+    target: Option<U256>,
     job_id: Option<u32>,
     version: Option<u32>,
     handicap: u32,
@@ -558,7 +559,7 @@ impl Miner {
             .iter()
             .fold("".to_string(), |acc, b| acc + format!("{:02x}", b).as_str());
         info!("Set target to {}", hex_string);
-        self.target = Some(Uint256::from_be_bytes(target.try_into().unwrap()));
+        self.target = Some(U256::from_big_endian(target.as_slice()));
     }
 
     fn new_header(&mut self, set_new_prev_hash: &SetNewPrevHash, new_job: &NewMiningJob) {
@@ -588,9 +589,9 @@ impl Miner {
     pub fn next_share(&mut self) -> NextShareOutcome {
         if let Some(header) = self.header.as_ref() {
             let hash_ = header.block_hash();
-            let hash: [u8; 32] = *hash_.to_raw_hash().as_ref();
+            let mut hash: [u8; 32] = *hash_.to_raw_hash().as_ref();
             hash.reverse();
-            if hash < *self.target.as_ref().unwrap() {
+            if hash < self.target.unwrap().to_little_endian() {
                 info!(
                     "Found share with nonce: {}, for target: {:?}, with hash: {:?}",
                     header.nonce, self.target, hash,

@@ -1,6 +1,7 @@
 use crate::job::Job;
 use std::convert::TryInto;
-use stratum_common::bitcoin::{blockdata::block::Header, hash_types::{BlockHash, TxMerkleNode}, hashes::{sha256d::Hash as DHash, Hash}, util::uint::Uint256, CompactTarget};
+use primitive_types::U256;
+use stratum_common::bitcoin::{blockdata::block::Header, hash_types::{BlockHash, TxMerkleNode}, hashes::{sha256d::Hash as DHash, Hash}, CompactTarget};
 use stratum_common::bitcoin::block::Version;
 use tracing::info;
 
@@ -12,7 +13,7 @@ pub(crate) struct Miner {
     /// Mock of mined candidate block header.
     pub(crate) header: Option<Header>,
     /// Current mining target.
-    pub(crate) target: Option<Uint256>,
+    pub(crate) target: Option<U256>,
     /// ID of the job used while submitting share generated from this job.
     pub(crate) job_id: Option<u32>,
     /// Block header version
@@ -34,7 +35,7 @@ impl Miner {
     }
 
     /// Updates target when a new target is received by the SV1 `Client`.
-    pub(crate) fn new_target(&mut self, target: Uint256) {
+    pub(crate) fn new_target(&mut self, target: U256) {
         self.target = Some(target);
     }
 
@@ -69,9 +70,9 @@ impl Miner {
     pub(crate) fn next_share(&mut self) -> Result<(), ()> {
         let header = self.header.as_ref().ok_or(())?;
         let hash_ = header.block_hash();
-        let hash: [u8; 32] = *hash_.to_raw_hash().as_ref();
+        let mut hash: [u8; 32] = *hash_.to_raw_hash().as_ref();
         hash.reverse();
-        let hash = Uint256::from_be_bytes(hash);
+        let hash = U256::from_big_endian(hash.as_ref());
         if hash < *self.target.as_ref().ok_or(())? {
             info!(
                 "Found share with nonce: {}, for target: {:?}, hash: {:?}",
