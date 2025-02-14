@@ -1,11 +1,7 @@
 use crate::job::Job;
 use std::convert::TryInto;
-use stratum_common::bitcoin::{
-    blockdata::block::Header,
-    hash_types::{BlockHash, TxMerkleNode},
-    hashes::{sha256d::Hash as DHash, Hash},
-    util::uint::Uint256,
-};
+use stratum_common::bitcoin::{blockdata::block::Header, hash_types::{BlockHash, TxMerkleNode}, hashes::{sha256d::Hash as DHash, Hash}, util::uint::Uint256, CompactTarget};
+use stratum_common::bitcoin::block::Version;
 use tracing::info;
 
 /// A mock representation of a Mining Device that produces block header hashes to be submitted by
@@ -53,7 +49,7 @@ impl Miner {
         let merkle_root: [u8; 32] = new_job.merkle_root.to_vec().try_into().unwrap();
         let merkle_root = DHash::from_byte_array(merkle_root);
         let header = Header {
-            version: new_job.version as i32,
+            version: Version::from_consensus(new_job.version as i32),
             prev_blockhash: BlockHash::from_raw_hash(prev_hash),
             merkle_root: TxMerkleNode::from_raw_hash(merkle_root),
             time: std::time::SystemTime::now()
@@ -62,7 +58,7 @@ impl Miner {
                 )
                 .unwrap()
                 .as_secs() as u32,
-            bits: new_job.nbits,
+            bits: CompactTarget::from_consensus(new_job.nbits),
             nonce: 0,
         };
         self.header = Some(header);

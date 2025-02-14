@@ -32,9 +32,7 @@ use roles_logic_sv2::{
     utils::Mutex,
 };
 use std::time::Instant;
-use stratum_common::bitcoin::{
-    blockdata::block::Header, hash_types::BlockHash, hashes::Hash, util::uint::Uint256,
-};
+use stratum_common::bitcoin::{blockdata::block::Header, hash_types::BlockHash, hashes::Hash, util::uint::Uint256, CompactTarget};
 use tracing::{error, info};
 
 pub async fn connect(
@@ -97,6 +95,7 @@ pub type EitherFrame = StandardEitherFrame<Message>;
 
 struct SetupConnectionHandler {}
 use std::convert::TryInto;
+use stratum_common::bitcoin::block::Version;
 
 impl SetupConnectionHandler {
     pub fn new() -> Self {
@@ -572,7 +571,7 @@ impl Miner {
         // fields need to be added as BE and the are converted to LE in the background before
         // hashing
         let header = Header {
-            version: new_job.version as i32,
+            version: Version::from_consensus(new_job.version as i32),
             prev_blockhash: BlockHash::from_raw_hash(prev_hash),
             merkle_root,
             time: std::time::SystemTime::now()
@@ -581,7 +580,7 @@ impl Miner {
                 )
                 .unwrap()
                 .as_secs() as u32,
-            bits: set_new_prev_hash.nbits,
+            bits: CompactTarget::from_consensus(set_new_prev_hash.nbits),
             nonce: 0,
         };
         self.header = Some(header);
@@ -628,14 +627,14 @@ fn measure_hashrate(duration_secs: u64, handicap: u32) -> f64 {
     let merkle_root: [u8; 32] = generate_random_32_byte_array().to_vec().try_into().unwrap();
     let merkle_root = Hash::from_byte_array(merkle_root);
     let header = Header {
-        version: rng.gen(),
+        version: Version::from_consensus(rng.gen()),
         prev_blockhash: BlockHash::from_raw_hash(prev_hash),
         merkle_root,
         time: std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(60))
             .unwrap()
             .as_secs() as u32,
-        bits: rng.gen(),
+        bits: CompactTarget::from_consensus(rng.gen()),
         nonce: 0,
     };
     let start_time = Instant::now();
