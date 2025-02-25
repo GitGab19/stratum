@@ -12,7 +12,7 @@ use roles_logic_sv2::{
     utils::{hash_lists_tuple, Mutex},
 };
 use std::{collections::HashMap, convert::TryInto, str::FromStr};
-use stratum_common::bitcoin::{util::psbt::serialize::Deserialize, Transaction};
+use stratum_common::bitcoin::{consensus, Transaction};
 use tokio::task::AbortHandle;
 use tracing::{error, info};
 
@@ -252,7 +252,7 @@ impl JobDeclarator {
         let mut tx_list: Vec<Transaction> = Vec::new();
         for tx in tx_list_.to_vec() {
             //TODO remove unwrap
-            let tx = Transaction::deserialize(&tx).unwrap();
+            let tx = consensus::deserialize(&tx).unwrap();
             tx_list.push(tx);
         }
         let declare_job = DeclareMiningJob {
@@ -314,6 +314,7 @@ impl JobDeclarator {
                             // that the token has been updated so that on_set_new_prev_hash know it
                             // and can decide if send the set_custom_job or not
                             if is_future {
+                                info!("Job {} inserted into future_jobs", id);
                                 last_declare_mining_job_sent.mining_job_token = new_token;
                                 self_mutex
                                     .safe_lock(|s| {
@@ -349,7 +350,7 @@ impl JobDeclarator {
                                         pool_outs,
                                         template.coinbase_tx_locktime,
                                         template.template_id
-                                        ).await.unwrap(),
+                                    ).await.unwrap(),
                                     None => panic!("Invalid state we received a NewTemplate not future, without having received a set new prev hash")
                                 }
                             }
@@ -387,9 +388,23 @@ impl JobDeclarator {
         tokio::task::spawn(async move {
             let id = set_new_prev_hash.template_id;
             let _ = self_mutex.safe_lock(|s| {
+                // Log PRIMA della modifica
+                info!(
+        "Before update - last_set_new_prev_hash: {:?}, set_new_prev_hash_counter: {}",
+        s.last_set_new_prev_hash, s.set_new_prev_hash_counter
+    );
+
+                // Modifica dei valori
                 s.last_set_new_prev_hash = Some(set_new_prev_hash.clone());
                 s.set_new_prev_hash_counter += 1;
+
+                // Log DOPO la modifica
+                info!(
+        "After update - last_set_new_prev_hash: {:?}, set_new_prev_hash_counter: {}",
+        s.last_set_new_prev_hash, s.set_new_prev_hash_counter
+    );
             });
+
             let (job, up, merkle_path, template, mut pool_outs) = loop {
                 match self_mutex
                     .safe_lock(|s| {
@@ -398,6 +413,7 @@ impl JobDeclarator {
                         //it means that a new prev_hash is arrived while the previous hasn't exited
                         // the loop yet
                         {
+                            info!("Job {} skipped due to set_new_prev_hash_counter", id);
                             s.set_new_prev_hash_counter -= 1;
                             Some(None)
                         } else {
@@ -422,6 +438,7 @@ impl JobDeclarator {
             let signed_token = job.mining_job_token.clone();
             let mut template_outs = template.coinbase_tx_outputs.to_vec();
             pool_outs.append(&mut template_outs);
+            info!("Send set custom mining job after removal: {:?}", set_new_prev_hash);
             Upstream::set_custom_jobs(
                 &up,
                 job,
@@ -436,8 +453,8 @@ impl JobDeclarator {
                 template.coinbase_tx_locktime,
                 template.template_id,
             )
-            .await
-            .unwrap();
+                .await
+                .unwrap();
         });
     }
 
