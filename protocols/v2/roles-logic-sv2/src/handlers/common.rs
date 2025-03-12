@@ -45,7 +45,7 @@ pub type SendTo = SendTo_<CommonMessages<'static>, ()>;
 
 /// A trait that is implemented by the downstream. It should be used to parse the common messages
 /// that are sent from the upstream to the downstream.
-pub trait ParseUpstreamCommonMessages<Router: CommonRouter>
+pub trait ParseUpstreamCommonMessages
 where
     Self: Sized,
 {
@@ -55,12 +55,10 @@ where
         self_: Arc<Mutex<Self>>,
         message_type: u8,
         payload: &mut [u8],
-        routing_logic: CommonRoutingLogic<Router>,
     ) -> Result<SendTo, Error> {
         Self::handle_message_common_deserilized(
             self_,
             (message_type, payload).try_into(),
-            routing_logic,
         )
     }
 
@@ -68,7 +66,6 @@ where
     fn handle_message_common_deserilized(
         self_: Arc<Mutex<Self>>,
         message: Result<CommonMessages<'_>, Error>,
-        _routing_logic: CommonRoutingLogic<Router>,
     ) -> Result<SendTo, Error> {
         match message {
             Ok(CommonMessages::SetupConnectionSuccess(m)) => {
@@ -133,7 +130,7 @@ where
 /// A trait that is implemented by the upstream node, and is used to handle
 /// [`crate::parsers::CommonMessages::SetupConnection`] messages sent by the downstream to the
 /// upstream
-pub trait ParseDownstreamCommonMessages<Router: CommonRouter>
+pub trait ParseDownstreamCommonMessages
 where
     Self: Sized,
 {
@@ -156,28 +153,22 @@ where
     }
 
     /// It takes a message type and a payload, and if the message is a serialized setup connection
-    /// message, it calls the `on_setup_connection` function on the routing logic, and then calls
-    /// the `handle_setup_connection` function on the router
+    /// message, it calls the handle_setup_connection function
     fn handle_message_common(
         self_: Arc<Mutex<Self>>,
         message_type: u8,
         payload: &mut [u8],
-        routing_logic: CommonRoutingLogic<Router>,
     ) -> Result<SendTo, Error> {
         Self::handle_message_common_deserilized(
             self_,
             (message_type, payload).try_into(),
-            routing_logic,
         )
     }
 
-    /// It takes a message do setup connection message, it calls
-    /// the `on_setup_connection` function on the routing logic, and then calls
-    /// the `handle_setup_connection` function on the router
+    /// It takes a message do setup connection message and calls the handle_setup_connection function
     fn handle_message_common_deserilized(
         self_: Arc<Mutex<Self>>,
         message: Result<CommonMessages<'_>, Error>,
-        routing_logic: CommonRoutingLogic<Router>,
     ) -> Result<SendTo, Error> {
         match message {
             Ok(CommonMessages::SetupConnection(m)) => {
@@ -186,20 +177,9 @@ where
                     m.min_version, m.flags
                 );
                 debug!("Setup connection message: {:?}", m);
-                match routing_logic {
-                    CommonRoutingLogic::Proxy(r_logic) => {
-                        trace!("On SetupConnection r_logic is {:?}", r_logic);
-                        let result = r_logic
-                            .safe_lock(|r_logic| r_logic.on_setup_connection(&m))
-                            .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
-                        self_
-                            .safe_lock(|x| x.handle_setup_connection(m, Some(result)))
-                            .map_err(|e| crate::Error::PoisonLock(e.to_string()))?
-                    }
-                    CommonRoutingLogic::None => self_
-                        .safe_lock(|x| x.handle_setup_connection(m, None))
-                        .map_err(|e| crate::Error::PoisonLock(e.to_string()))?,
-                }
+                self_
+                    .safe_lock(|x| x.handle_setup_connection(m))
+                    .map_err(|e| crate::Error::PoisonLock(e.to_string()))?
             }
             Ok(CommonMessages::SetupConnectionSuccess(_)) => Err(Error::UnexpectedMessage(
                 const_sv2::MESSAGE_TYPE_SETUP_CONNECTION_SUCCESS,
@@ -217,10 +197,9 @@ where
     /// Handles a `SetupConnection` message.
     ///
     /// This method processes a `SetupConnection` message and handles it
-    /// by delegating to the appropriate handler in the routing logic.
+    /// by delegating to the appropriate handler.
     fn handle_setup_connection(
         &mut self,
         m: SetupConnection,
-        result: Option<Result<(CommonDownstreamData, SetupConnectionSuccess), Error>>,
     ) -> Result<SendTo, Error>;
 }

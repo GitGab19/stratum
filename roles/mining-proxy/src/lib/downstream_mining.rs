@@ -414,25 +414,36 @@ impl
 {
     fn handle_setup_connection(
         &mut self,
-        _: SetupConnection,
-        result: Option<Result<(CommonDownstreamData, SetupConnectionSuccess), Error>>,
+        m: SetupConnection,
     ) -> Result<roles_logic_sv2::handlers::common::SendTo, Error> {
-        let (data, message) = result.unwrap().unwrap();
-        let upstream = match super::get_routing_logic() {
-            MiningRoutingLogic::Proxy(proxy_routing) => {
-                proxy_routing
-                    .safe_lock(|r| r.downstream_to_upstream_map.get(&data).unwrap()[0].clone())
-                    .unwrap()
+        let routing_logic = super::get_routing_logic();
+        let result = match routing_logic {
+            MiningRoutingLogic::Proxy(r_logic) => {
+                trace!("On SetupConnection r_logic is {:?}", r_logic);
+                let result = r_logic
+                    .safe_lock(|r_logic| r_logic.on_setup_connection(&m))
+                    .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
+                
+                let (data, message) = result;
+                let upstream = match super::get_routing_logic() {
+                    MiningRoutingLogic::Proxy(proxy_routing) => {
+                        proxy_routing
+                            .safe_lock(|r| r.downstream_to_upstream_map.get(&data).unwrap()[0].clone())
+                            .unwrap()
+                    }
+                    _ => unreachable!(),
+                };
+                self.upstream = Some(upstream);
+                self.status.pair(data);
+                Ok(SendToCommon::RelayNewMessageToRemote(
+                    Arc::new(Mutex::new(())),
+                    message.into(),
+                ))
             }
-            _ => unreachable!(),
-        };
-        self.upstream = Some(upstream);
+            _ => unreachable!("Mining proxy must use proxy routing logic"),
+        }?;
 
-        self.status.pair(data);
-        Ok(SendToCommon::RelayNewMessageToRemote(
-            Arc::new(Mutex::new(())),
-            message.into(),
-        ))
+        Ok(result)
     }
 }
 
@@ -453,23 +464,14 @@ pub async fn listen_for_downstream_mining(
                     node.receiver.recv().await.unwrap().try_into().unwrap();
                 let message_type = incoming.get_header().unwrap().msg_type();
                 let payload = incoming.payload();
-                let routing_logic = super::get_common_routing_logic();
                 let node = Arc::new(Mutex::new(node));
 
-                match routing_logic {
-                    CommonRoutingLogic::Proxy(r_logic) => {
-                        trace!("On SetupConnection r_logic is {:?}", r_logic);
-                        let result = r_logic
-                            .safe_lock(|r_logic| r_logic.on_setup_connection(&m))
-                            .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
-                }
                 // Call handle_setup_connection or fail
                 let common_msg = DownstreamMiningNode::handle_message_common(
                     node.clone(),
                     message_type,
                     payload,
                 ).expect("failed to process downstream message");
-
 
                 if let SendToCommon::RelayNewMessageToRemote(_, relay_msg) = common_msg {
                     if let roles_logic_sv2::parsers::CommonMessages::SetupConnectionSuccess(setup_msg) = relay_msg {
