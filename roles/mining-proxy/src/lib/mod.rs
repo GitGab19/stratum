@@ -1,13 +1,15 @@
 pub mod downstream_mining;
 pub mod error;
 pub mod upstream_mining;
+mod selectors;
+mod routing_logic;
 
 use once_cell::sync::OnceCell;
 use roles_logic_sv2::{
-    routing_logic::{CommonRoutingLogic, MiningProxyRoutingLogic, MiningRoutingLogic},
-    selectors::GeneralMiningSelector,
     utils::{GroupId, Id, Mutex},
 };
+use routing_logic::{CommonRoutingLogic, MiningProxyRoutingLogic, MiningRoutingLogic};
+use selectors::GeneralMiningSelector;
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::oneshot};

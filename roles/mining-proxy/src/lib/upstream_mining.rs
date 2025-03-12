@@ -25,10 +25,12 @@ use roles_logic_sv2::{
     job_dispatcher::GroupChannelJobDispatcher,
     mining_sv2::*,
     parsers::{AnyMessage, CommonMessages, Mining, MiningDeviceMessages},
-    routing_logic::MiningProxyRoutingLogic,
-    selectors::{DownstreamMiningSelector, ProxyDownstreamMiningSelector as Prs},
     template_distribution_sv2::SubmitSolution,
     utils::{GroupId, Id, Mutex},
+};
+use super::{
+    routing_logic::MiningProxyRoutingLogic,
+    selectors::{DownstreamMiningSelector, ProxyDownstreamMiningSelector as Prs}
 };
 use stratum_common::bitcoin::TxOut;
 

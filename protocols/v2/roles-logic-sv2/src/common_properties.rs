@@ -5,9 +5,6 @@
 //! and channel management. These definitions form the foundation for consistent communication and
 //! behavior across Sv2 roles/applications.
 
-use crate::selectors::{
-    DownstreamMiningSelector, DownstreamSelector, NullDownstreamMiningSelector,
-};
 use common_messages_sv2::{has_requires_std_job, Protocol, SetupConnection};
 use mining_sv2::{Extranonce, Target};
 use nohash_hasher::BuildNoHashHasher;
@@ -72,7 +69,7 @@ pub struct PairSettings {
 }
 
 /// Properties defining behaviors common to all Sv2 upstream nodes.
-pub trait IsUpstream<Down: IsDownstream, Sel: DownstreamSelector<Down> + ?Sized> {
+pub trait IsUpstream<Down: IsDownstream, RemoteSelector> {
     /// Returns the protocol version used by the upstream node.
     fn get_version(&self) -> u16;
 
@@ -102,8 +99,8 @@ pub trait IsUpstream<Down: IsDownstream, Sel: DownstreamSelector<Down> + ?Sized>
     /// Provides a request ID mapper for viewing and managing upstream-downstream communication.
     fn get_mapper(&mut self) -> Option<&mut RequestIdMapper>;
 
-    /// Returns the selector ([`crate::selectors`] for managing downstream nodes.
-    fn get_remote_selector(&mut self) -> &mut Sel;
+    /// Returns the selector for managing downstream nodes.
+    fn get_remote_selector(&mut self) -> &mut RemoteSelector;
 }
 
 /// The types of channels that can be opened with upstream nodes.
@@ -167,8 +164,8 @@ pub struct StandardChannel {
 ///
 /// This trait extends [`IsUpstream`] with additional functionality specific to mining, such as
 /// hashrate management and channel updates.
-pub trait IsMiningUpstream<Down: IsMiningDownstream, Sel: DownstreamMiningSelector<Down> + ?Sized>:
-    IsUpstream<Down, Sel>
+pub trait IsMiningUpstream<Down: IsMiningDownstream, RemoteSelector>:
+    IsUpstream<Down, RemoteSelector>
 {
     /// Returns the total hashrate managed by the upstream node.
     fn total_hash_rate(&self) -> u64;
@@ -207,7 +204,7 @@ pub trait IsMiningDownstream: IsDownstream {
 }
 
 // Implemented for the `NullDownstreamMiningSelector`.
-impl<Down: IsDownstream + D> IsUpstream<Down, NullDownstreamMiningSelector> for () {
+impl<Down: IsDownstream + D> IsUpstream<Down, ()> for () {
     fn get_version(&self) -> u16 {
         unreachable!("Null upstream do not have a version");
     }
@@ -219,6 +216,7 @@ impl<Down: IsDownstream + D> IsUpstream<Down, NullDownstreamMiningSelector> for 
     fn get_supported_protocols(&self) -> Vec<Protocol> {
         unreachable!("Null upstream do not support any protocol");
     }
+    
     fn get_id(&self) -> u32 {
         unreachable!("Null upstream do not have an ID");
     }
@@ -227,7 +225,7 @@ impl<Down: IsDownstream + D> IsUpstream<Down, NullDownstreamMiningSelector> for 
         unreachable!("Null upstream do not have a mapper")
     }
 
-    fn get_remote_selector(&mut self) -> &mut NullDownstreamMiningSelector {
+    fn get_remote_selector(&mut self) -> &mut () {
         unreachable!("Null upstream do not have a selector")
     }
 }
@@ -239,7 +237,7 @@ impl IsDownstream for () {
     }
 }
 
-impl<Down: IsMiningDownstream + D> IsMiningUpstream<Down, NullDownstreamMiningSelector> for () {
+impl<Down: IsMiningDownstream + D> IsMiningUpstream<Down, ()> for () {
     fn total_hash_rate(&self) -> u64 {
         unreachable!("Null selector do not have hash rate");
     }
@@ -247,6 +245,7 @@ impl<Down: IsMiningDownstream + D> IsMiningUpstream<Down, NullDownstreamMiningSe
     fn add_hash_rate(&mut self, _to_add: u64) {
         unreachable!("Null selector can not add hash rate");
     }
+    
     fn get_opened_channels(&mut self) -> &mut Vec<UpstreamChannel> {
         unreachable!("Null selector can not open channels");
     }

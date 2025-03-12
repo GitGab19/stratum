@@ -16,11 +16,12 @@ use roles_logic_sv2::{
     },
     mining_sv2::*,
     parsers::{AnyMessage, Mining, MiningDeviceMessages},
-    routing_logic::MiningProxyRoutingLogic,
     utils::Mutex,
 };
-
-use super::upstream_mining::{ProxyRemoteSelector, StdFrame as UpstreamFrame, UpstreamMiningNode};
+use super::{
+    upstream_mining::{ProxyRemoteSelector, StdFrame as UpstreamFrame, UpstreamMiningNode},
+    routing_logic::{MiningProxyRoutingLogic, MiningRoutingLogic},
+};
 
 pub type Message = MiningDeviceMessages<'static>;
 pub type StdFrame = StandardSv2Frame<Message>;
@@ -409,9 +410,7 @@ impl
 }
 
 impl
-    ParseDownstreamCommonMessages<
-        MiningProxyRoutingLogic<Self, UpstreamMiningNode, ProxyRemoteSelector>,
-    > for DownstreamMiningNode
+    ParseDownstreamCommonMessages for DownstreamMiningNode
 {
     fn handle_setup_connection(
         &mut self,
@@ -420,7 +419,7 @@ impl
     ) -> Result<roles_logic_sv2::handlers::common::SendTo, Error> {
         let (data, message) = result.unwrap().unwrap();
         let upstream = match super::get_routing_logic() {
-            roles_logic_sv2::routing_logic::MiningRoutingLogic::Proxy(proxy_routing) => {
+            MiningRoutingLogic::Proxy(proxy_routing) => {
                 proxy_routing
                     .safe_lock(|r| r.downstream_to_upstream_map.get(&data).unwrap()[0].clone())
                     .unwrap()
@@ -457,12 +456,18 @@ pub async fn listen_for_downstream_mining(
                 let routing_logic = super::get_common_routing_logic();
                 let node = Arc::new(Mutex::new(node));
 
+                match routing_logic {
+                    CommonRoutingLogic::Proxy(r_logic) => {
+                        trace!("On SetupConnection r_logic is {:?}", r_logic);
+                        let result = r_logic
+                            .safe_lock(|r_logic| r_logic.on_setup_connection(&m))
+                            .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
+                }
                 // Call handle_setup_connection or fail
                 let common_msg = DownstreamMiningNode::handle_message_common(
                     node.clone(),
                     message_type,
                     payload,
-                    routing_logic
                 ).expect("failed to process downstream message");
 
 

@@ -4,7 +4,7 @@
 //! in a mining proxy environment. Selectors help determine the appropriate remote(s) to relay or
 //! send messages to.
 
-use crate::{
+use roles_logic_sv2::{
     common_properties::{IsDownstream, IsMiningDownstream, IsMiningUpstream, PairSettings},
     utils::Mutex,
     Error,
@@ -58,7 +58,7 @@ impl<Down: IsMiningDownstream> ProxyDownstreamMiningSelector<Down> {
 }
 
 impl<Down: IsMiningDownstream> DownstreamMiningSelector<Down>
-    for ProxyDownstreamMiningSelector<Down>
+for ProxyDownstreamMiningSelector<Down>
 {
     /// Records a request to open a standard channel with an associated downstream node.
     fn on_open_standard_channel_request(&mut self, request_id: u32, downstream: Arc<Mutex<Down>>) {
@@ -127,7 +127,7 @@ impl<Down: IsMiningDownstream> DownstreamSelector<Down> for ProxyDownstreamMinin
 /// Logic for an upstream mining node to locate the correct downstream node to which a message
 /// should be sent or relayed.
 pub trait DownstreamMiningSelector<Downstream: IsMiningDownstream>:
-    DownstreamSelector<Downstream>
+DownstreamSelector<Downstream>
 {
     /// Handles a downstream node's request to open a standard channel.
     fn on_open_standard_channel_request(
@@ -288,10 +288,10 @@ pub struct GeneralMiningSelector<
 }
 
 impl<
-        Sel: DownstreamMiningSelector<Down>,
-        Up: IsMiningUpstream<Down, Sel>,
-        Down: IsMiningDownstream,
-    > GeneralMiningSelector<Sel, Down, Up>
+    Sel: DownstreamMiningSelector<Down>,
+    Up: IsMiningUpstream<Down, Sel>,
+    Down: IsMiningDownstream,
+> GeneralMiningSelector<Sel, Down, Up>
 {
     /// Creates a new [`GeneralMiningSelector`] instance with the given upstream nodes.
     pub fn new(upstreams: Vec<Arc<Mutex<Up>>>) -> Self {
@@ -314,18 +314,18 @@ impl<
 }
 
 impl<
-        Sel: DownstreamMiningSelector<Down>,
-        Down: IsMiningDownstream,
-        Up: IsMiningUpstream<Down, Sel>,
-    > UpstreamSelector for GeneralMiningSelector<Sel, Down, Up>
+    Sel: DownstreamMiningSelector<Down>,
+    Down: IsMiningDownstream,
+    Up: IsMiningUpstream<Down, Sel>,
+> UpstreamSelector for GeneralMiningSelector<Sel, Down, Up>
 {
 }
 
 impl<
-        Sel: DownstreamMiningSelector<Down>,
-        Down: IsMiningDownstream,
-        Up: IsMiningUpstream<Down, Sel>,
-    > UpstreamMiningSelctor<Down, Up, Sel> for GeneralMiningSelector<Sel, Down, Up>
+    Sel: DownstreamMiningSelector<Down>,
+    Down: IsMiningDownstream,
+    Up: IsMiningUpstream<Down, Sel>,
+> UpstreamMiningSelctor<Down, Up, Sel> for GeneralMiningSelector<Sel, Down, Up>
 {
     fn on_setup_connection(
         &mut self,

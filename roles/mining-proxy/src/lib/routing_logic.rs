@@ -22,12 +22,9 @@
 //! - Consider hiding all traits from the public API and exporting only marker traits.
 //! - Improve upstream selection logic to be configurable by the caller.
 
-use crate::{
+use super::selectors::{DownstreamMiningSelector, GeneralMiningSelector, NullDownstreamMiningSelector, UpstreamMiningSelctor};
+use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsMiningDownstream, IsMiningUpstream, PairSettings},
-    selectors::{
-        DownstreamMiningSelector, GeneralMiningSelector, NullDownstreamMiningSelector,
-        UpstreamMiningSelctor,
-    },
     utils::{Id, Mutex},
     Error,
 };
@@ -93,9 +90,9 @@ impl CommonRouter for NoRouting {
 }
 
 impl<
-        Down: IsMiningDownstream + D,
-        Up: IsMiningUpstream<Down, NullDownstreamMiningSelector> + D,
-    > MiningRouter<Down, Up, NullDownstreamMiningSelector> for NoRouting
+    Down: IsMiningDownstream + D,
+    Up: IsMiningUpstream<Down, NullDownstreamMiningSelector> + D,
+> MiningRouter<Down, Up, NullDownstreamMiningSelector> for NoRouting
 {
     fn on_open_standard_channel(
         &mut self,
@@ -128,7 +125,7 @@ pub enum CommonRoutingLogic<Router: 'static + CommonRouter> {
 #[derive(Debug)]
 pub enum MiningRoutingLogic<
     Down: IsMiningDownstream + D,
-    Up: IsMiningUpstream<Down, Sel> + D,
+    Up: IsMiningUpstream<Down> + D,
     Sel: DownstreamMiningSelector<Down> + D,
     Router: 'static + MiningRouter<Down, Up, Sel>,
 > {
@@ -150,11 +147,11 @@ impl<Router: CommonRouter> Clone for CommonRoutingLogic<Router> {
 }
 
 impl<
-        Down: IsMiningDownstream + D,
-        Up: IsMiningUpstream<Down, Sel> + D,
-        Sel: DownstreamMiningSelector<Down> + D,
-        Router: MiningRouter<Down, Up, Sel>,
-    > Clone for MiningRoutingLogic<Down, Up, Sel, Router>
+    Down: IsMiningDownstream + D,
+    Up: IsMiningUpstream<Down> + D,
+    Sel: DownstreamMiningSelector<Down> + D,
+    Router: MiningRouter<Down, Up, Sel>,
+> Clone for MiningRoutingLogic<Down, Up, Sel, Router>
 {
     fn clone(&self) -> Self {
         match self {
@@ -182,10 +179,10 @@ pub struct MiningProxyRoutingLogic<
 }
 
 impl<
-        Down: IsMiningDownstream + D,
-        Up: IsMiningUpstream<Down, Sel> + D,
-        Sel: DownstreamMiningSelector<Down> + D,
-    > CommonRouter for MiningProxyRoutingLogic<Down, Up, Sel>
+    Down: IsMiningDownstream + D,
+    Up: IsMiningUpstream<Down, Sel> + D,
+    Sel: DownstreamMiningSelector<Down> + D,
+> CommonRouter for MiningProxyRoutingLogic<Down, Up, Sel>
 {
     /// Handles the `SetupConnection` message.
     ///
@@ -217,10 +214,10 @@ impl<
 }
 
 impl<
-        Down: IsMiningDownstream + D,
-        Up: IsMiningUpstream<Down, Sel> + D,
-        Sel: DownstreamMiningSelector<Down> + D,
-    > MiningRouter<Down, Up, Sel> for MiningProxyRoutingLogic<Down, Up, Sel>
+    Down: IsMiningDownstream + D,
+    Up: IsMiningUpstream<Down, Sel> + D,
+    Sel: DownstreamMiningSelector<Down> + D,
+> MiningRouter<Down, Up, Sel> for MiningProxyRoutingLogic<Down, Up, Sel>
 {
     // Handles the `OpenStandardMiningChannel` message.
     //
@@ -263,7 +260,7 @@ impl<
         let original_request_id = upstream
             .safe_lock(|u| {
                 u.get_mapper()
-                    .ok_or(crate::Error::RequestIdNotMapped(upstream_request_id))?
+                    .ok_or(Error::RequestIdNotMapped(upstream_request_id))?
                     .remove(upstream_request_id)
                     .ok_or(Error::RequestIdNotMapped(upstream_request_id))
             })
@@ -290,7 +287,7 @@ impl<
 fn minor_total_hr_upstream<Down, Up, Sel>(ups: &mut [Arc<Mutex<Up>>]) -> Arc<Mutex<Up>>
 where
     Down: IsMiningDownstream + D,
-    Up: IsMiningUpstream<Down, Sel> + D,
+    Up: IsMiningUpstream<Down> + D,
     Sel: DownstreamMiningSelector<Down> + D,
 {
     ups.iter_mut()
@@ -312,7 +309,7 @@ where
 fn filter_header_only<Down, Up, Sel>(ups: &mut [Arc<Mutex<Up>>]) -> Vec<Arc<Mutex<Up>>>
 where
     Down: IsMiningDownstream + D,
-    Up: IsMiningUpstream<Down, Sel> + D,
+    Up: IsMiningUpstream<Down> + D,
     Sel: DownstreamMiningSelector<Down> + D,
 {
     ups.iter()
@@ -334,7 +331,7 @@ where
 fn select_upstream<Down, Up, Sel>(ups: &mut [Arc<Mutex<Up>>]) -> Option<Arc<Mutex<Up>>>
 where
     Down: IsMiningDownstream + D,
-    Up: IsMiningUpstream<Down, Sel> + D,
+    Up: IsMiningUpstream<Down> + D,
     Sel: DownstreamMiningSelector<Down> + D,
 {
     if ups.is_empty() {
@@ -349,16 +346,19 @@ where
 }
 
 impl<
-        Down: IsMiningDownstream + D,
-        Up: IsMiningUpstream<Down, Sel> + D,
-        Sel: DownstreamMiningSelector<Down> + D,
-    > MiningProxyRoutingLogic<Down, Up, Sel>
+    Down: IsMiningDownstream + D,
+    Up: IsMiningUpstream<Down, Sel> + D,
+    Sel: DownstreamMiningSelector<Down> + D,
+> MiningProxyRoutingLogic<Down, Up, Sel>
 {
     // Selects an upstream entity from a list of available upstreams.
     fn select_upstreams(ups: &mut [Arc<Mutex<Up>>]) -> Option<Arc<Mutex<Up>>> {
         select_upstream(ups)
     }
 
+    /*fn get_remote_selector(&mut self) -> &mut ProxyDownstreamMiningSelector<Down> {
+        &mut self.upstream_selector
+    }*/
     /// Handles the `SetupConnection` process for header-only mining downstream's.
     ///
     /// This method selects compatible upstreams, assigns connection flags, and maps the
@@ -394,11 +394,11 @@ impl<
     ) -> Result<Arc<Mutex<Up>>, Error> {
         let downstream_mining_data = downstream
             .safe_lock(|d| d.get_downstream_mining_data())
-            .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
+            .map_err(|e| Error::PoisonLock(e.to_string()))?;
         let upstream = self
             .downstream_to_upstream_map
             .get(&downstream_mining_data)
-            .ok_or(crate::Error::NoCompatibleUpstream(downstream_mining_data))?[0]
+            .ok_or(Error::NoCompatibleUpstream(downstream_mining_data))?[0]
             .clone();
         upstream
             .safe_lock(|u| {
