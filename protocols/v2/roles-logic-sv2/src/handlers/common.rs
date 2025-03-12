@@ -26,10 +26,8 @@
 
 use super::SendTo_;
 use crate::{
-    common_properties::CommonDownstreamData,
     errors::Error,
     parsers::CommonMessages,
-    routing_logic::{CommonRouter, CommonRoutingLogic},
     utils::Mutex,
 };
 use common_messages_sv2::{
@@ -38,7 +36,7 @@ use common_messages_sv2::{
 use const_sv2::*;
 use core::convert::TryInto;
 use std::sync::Arc;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 /// see [`SendTo_`]
 pub type SendTo = SendTo_<CommonMessages<'static>, ()>;

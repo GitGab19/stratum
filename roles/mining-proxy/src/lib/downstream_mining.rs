@@ -2,7 +2,7 @@ use std::{convert::TryInto, sync::Arc};
 
 use async_channel::{Receiver, SendError, Sender};
 use tokio::{net::TcpListener, sync::oneshot::Receiver as TokioReceiver};
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use codec_sv2::{StandardEitherFrame, StandardSv2Frame};
 use network_helpers_sv2::plain_connection::PlainConnection;
@@ -18,6 +18,7 @@ use roles_logic_sv2::{
     parsers::{AnyMessage, Mining, MiningDeviceMessages},
     utils::Mutex,
 };
+use crate::lib::routing_logic::CommonRouter;
 use super::{
     upstream_mining::{ProxyRemoteSelector, StdFrame as UpstreamFrame, UpstreamMiningNode},
     routing_logic::{MiningProxyRoutingLogic, MiningRoutingLogic},
@@ -422,7 +423,7 @@ impl
                 trace!("On SetupConnection r_logic is {:?}", r_logic);
                 let result = r_logic
                     .safe_lock(|r_logic| r_logic.on_setup_connection(&m))
-                    .map_err(|e| crate::Error::PoisonLock(e.to_string()))?;
+                    .map_err(|e| Error::PoisonLock(e.to_string()))?;
                 
                 let (data, message) = result;
                 let upstream = match super::get_routing_logic() {
