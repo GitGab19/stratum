@@ -17,7 +17,7 @@ use roles_logic_sv2::{
     },
     mining_sv2::*,
     parsers::{Mining, MiningDeviceMessages},
-    routing_logic::{MiningRoutingLogic, NoRouting},
+    routing_logic::NoRouting,
     selectors::NullDownstreamMiningSelector,
     utils::{Id, Mutex},
 };
@@ -294,13 +294,8 @@ impl Device {
             let mut incoming: StdFrame = receiver.recv().await.unwrap().try_into().unwrap();
             let message_type = incoming.get_header().unwrap().msg_type();
             let payload = incoming.payload();
-            let next = Device::handle_message_mining(
-                self_mutex.clone(),
-                message_type,
-                payload,
-                MiningRoutingLogic::None,
-            )
-            .unwrap();
+            let next =
+                Device::handle_message_mining(self_mutex.clone(), message_type, payload).unwrap();
             let mut notify_changes_to_mining_thread = self_mutex
                 .safe_lock(|s| s.notify_changes_to_mining_thread.clone())
                 .unwrap();
@@ -407,7 +402,6 @@ impl ParseMiningMessagesFromUpstream<(), NullDownstreamMiningSelector, NoRouting
     fn handle_open_standard_mining_channel_success(
         &mut self,
         m: OpenStandardMiningChannelSuccess,
-        _: Option<std::sync::Arc<Mutex<()>>>,
     ) -> Result<SendTo<()>, Error> {
         self.channel_opened = true;
         self.channel_id = Some(m.channel_id);
