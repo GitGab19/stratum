@@ -9,6 +9,7 @@ members = [
     "translator",
     "jd-client",
     "jd-server",
+    "new-tproxy",
     "roles-utils/network-helpers"
 ]
 
