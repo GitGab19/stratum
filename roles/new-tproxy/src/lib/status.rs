@@ -155,69 +155,56 @@ pub async fn handle_error(
     tracing::error!("Error: {:?}", &e);
     match e {
         Error::VecToSlice32(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors on bad CLI argument input.
         Error::BadCliArgs => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors on bad `serde_json` serialize/deserialize.
         Error::BadSerdeJson(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors on bad `config` TOML deserialize.
         Error::BadConfigDeserialize(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        // Errors from `binary_sv2` crate.
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::BinarySv2(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors on bad noise handshake.
         Error::CodecNoise(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors from `framing_sv2` crate.
         Error::FramingSv2(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        //If the pool sends the tproxy an invalid extranonce
         Error::InvalidExtranonce(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        // Errors on bad `TcpStream` connection.
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::Io(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors on bad `String` to `int` conversion.
         Error::ParseInt(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Errors from `roles_logic_sv2` crate.
         Error::RolesSv2Logic(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::UpstreamIncoming(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        // SV1 protocol library error
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::V1Protocol(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::SubprotocolMining(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        // Locking Errors
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::PoisonLock => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        // Channel Receiver Error
         Error::ChannelErrorReceiver(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::TokioChannelErrorRecv(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        // Channel Sender Errors
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::ChannelErrorSender(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::SetDifficultyToMessage(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
         Error::Infallible(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::Sv2ProtocolError(ref inner) => {
-            match inner {
-                // dont notify main thread just continue
-                roles_logic_sv2::parsers::Mining::SubmitSharesError(_) => {
-                    error_handling::ErrorBranch::Continue
+                match inner {
+                    // dont notify main thread just continue
+                    roles_logic_sv2::parsers::Mining::SubmitSharesError(_) => {
+                        error_handling::ErrorBranch::Continue
+                    }
+                    _ => send_status(sender, e, error_handling::ErrorBranch::Break).await,
                 }
-                _ => send_status(sender, e, error_handling::ErrorBranch::Break).await,
             }
-        }
         Error::TargetError(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Continue).await
-        }
+                send_status(sender, e, error_handling::ErrorBranch::Continue).await
+            }
         Error::Sv1MessageTooLong => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-    }
+                send_status(sender, e, error_handling::ErrorBranch::Break).await
+            }
+        Error::UnexpectedMessage => todo!(),
+            }
 }
