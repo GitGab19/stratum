@@ -11,10 +11,9 @@
 //! - [`diff_management`]: (Declared here, likely contains downstream difficulty logic)
 //! - [`downstream`]: Defines the core [`Downstream`] struct and its functionalities.
 
-use roles_logic_sv2::mining_sv2::Target;
 use v1::{client_to_server::Submit, utils::HexU32Be};
-pub mod diff_management;
 pub mod downstream;
+pub mod sv2_to_sv1_utils;
 pub use downstream::Downstream;
 
 /// This constant defines a timeout duration. It is used to enforce
@@ -30,9 +29,7 @@ const SUBSCRIBE_TIMEOUT_SECS: u64 = 10;
 pub enum DownstreamMessages {
     /// Represents a submitted share from a downstream miner,
     /// wrapped with the relevant channel ID.
-    SubmitShares(SubmitShareWithChannelId),
-    /// Represents an update to the downstream target for a specific channel.
-    SetDownstreamTarget(SetDownstreamTarget),
+    SubmitShares(SubmitShareWithChannelId)
 }
 
 /// wrapper around a `mining.submit` with extra channel informationfor the Bridge to
@@ -44,14 +41,6 @@ pub struct SubmitShareWithChannelId {
     pub extranonce: Vec<u8>,
     pub extranonce2_len: usize,
     pub version_rolling_mask: Option<HexU32Be>,
-}
-
-/// message for notifying the bridge that a downstream target has updated
-/// so the Bridge can process the update
-#[derive(Debug)]
-pub struct SetDownstreamTarget {
-    pub channel_id: u32,
-    pub new_target: Target,
 }
 
 /// This is just a wrapper function to send a message on the Downstream task shutdown channel
