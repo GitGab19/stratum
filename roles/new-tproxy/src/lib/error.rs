@@ -99,6 +99,7 @@ pub enum Error<'a> {
     #[allow(clippy::enum_variant_names)]
     TargetError(roles_logic_sv2::errors::Error),
     Sv1MessageTooLong,
+    UnexpectedMessage,
 }
 
 impl fmt::Display for Error<'_> {
@@ -135,6 +136,9 @@ impl fmt::Display for Error<'_> {
             }
             Sv1MessageTooLong => {
                 write!(f, "Received an sv1 message that is longer than max len")
+            }
+            UnexpectedMessage => {
+                write!(f, "Received a message type that was not expected")
             }
         }
     }
