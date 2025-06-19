@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use async_channel::Sender;
+use async_channel::{Sender, Receiver};
 use binary_sv2::u256_from_int;
 use roles_logic_sv2::{common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream}, job_creator::extended_job_to_non_segwit, mining_sv2::{NewExtendedMiningJob, SetNewPrevHash, Target}, utils::Mutex};
 use tokio::net::TcpListener;
@@ -10,31 +10,29 @@ use crate::{downstream_sv1::DownstreamMessages, error::ProxyResult, proxy::Chann
 
 #[derive(Debug)]
 pub struct Downstream {
-    downstream_id: u32,
-    pub(crate) user_identity: String,
-    pub(crate) nominal_hashrate: f32,
-    upstream_sender: Sender<DownstreamMessages>,
     downstream_sv1_sender: Sender<json_rpc::Message>,
-    extranonce1: Vec<u8>,
-    extranonce2_size: usize,
-
+    downstream_sv1_receiver: Receiver<json_rpc::Message>,
+    sv1_server_sender: Sender<json_rpc::Message>,
+    sv1_server_receiver: Receiver<json_rpc::Message>,
 }
 
 impl Downstream {
-    pub fn new(downstream_id: u32, user_identity: String, nominal_hashrate: f32, upstream_sender: Sender<DownstreamMessages>, downstream_sv1_sender: Sender<json_rpc::Message>, extranonce1: Vec<u8>, extranonce2_size: usize) -> Self {
-        Self { downstream_id, user_identity, nominal_hashrate, upstream_sender, downstream_sv1_sender, extranonce1, extranonce2_size }
+    pub fn new(downstream_sv1_sender: Sender<json_rpc::Message>, downstream_sv1_receiver: Receiver<json_rpc::Message>, sv1_server_sender: Sender<json_rpc::Message>, sv1_server_receiver: Receiver<json_rpc::Message>) -> Self {
+        Self { downstream_sv1_sender, downstream_sv1_receiver, sv1_server_sender, sv1_server_receiver }
     }
 
-    pub fn accept_incoming_connection(downstream_addr: SocketAddr, channel_manager: Arc<Mutex<ChannelManager>>) {
-        let hashrate = channel_manager.safe_lock(|s| s.proxy_config.downstream_difficulty_config.min_individual_miner_hashrate).unwrap();
-        let max_target = u256_from_int(u64::MAX);
-        let min_extranonce_size = channel_manager.safe_lock(|s| s.proxy_config.min_extranonce2_size).unwrap();
-        let accept_connections = tokio::task::spawn({
-            async move {
-                let listener = TcpListener::bind(downstream_addr).await.unwrap();
-                while let Ok((stream, _)) = listener.accept().await {
-                    channel_manager.safe_lock(|s| s.on_new_sv1_connection("user_identity", hashrate, max_target, min_extranonce_size)).unwrap();
-                }
+    pub fn spawn_downstream_receiver(&self) {
+        tokio::spawn(async move {
+            while let Ok(message) = self.downstream_sv1_receiver.recv().await {
+                self.sv1_server_sender.send(message).await.unwrap();
+            }
+        });
+    }
+
+    pub fn spawn_downstream_sender(&self) {
+        tokio::spawn(async move {
+            while let Ok(message) = self.sv1_server_receiver.recv().await {
+                self.downstream_sv1_sender.send(message).await.unwrap();
             }
         });
     }

@@ -1,5 +1,4 @@
 use std::{net::SocketAddr, sync::Arc};
-use binary_sv2::U256;
 use network_helpers_sv2::noise_connection::Connection;
 use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
 use roles_logic_sv2::{common_messages_sv2::{Protocol, SetupConnection}, handlers::common::ParseCommonMessagesFromUpstream, mining_sv2::{OpenExtendedMiningChannel, SubmitSharesExtended, UpdateChannel}, parsers::{AnyMessage, Mining}, utils::Mutex};
@@ -23,6 +22,8 @@ pub struct Upstream {
     pub sender: Sender<EitherFrame>,
     /// Sender for the ChannelManager thread
     pub channel_manager_sender: Sender<Mining<'static>>,
+    /// Receiver for the ChannelManager thread
+    pub channel_manager_receiver: Receiver<Mining<'static>>,
 }
 
 impl Upstream {
@@ -30,7 +31,8 @@ impl Upstream {
         upstream_address: SocketAddr,
         upstream_authority_public_key: Secp256k1PublicKey,
         channel_manager_sender: Sender<Mining<'static>>,
-    ) -> ProxyResult<'static, Arc<Mutex<Self>>> {
+        channel_manager_receiver: Receiver<Mining<'static>>,
+    ) -> ProxyResult<'static, Self> {
         // Connect to the SV2 Upstream role retry connection every 5 seconds.
         let socket = loop {
             match TcpStream::connect(upstream_address).await {
@@ -51,17 +53,25 @@ impl Upstream {
         let (receiver, sender) = Connection::new(socket, HandshakeRole::Initiator(initiator))
             .await
             .unwrap();
-        Ok(Arc::new(Mutex::new(Self {
+        Ok(Self {
             receiver,
             sender,
             channel_manager_sender,
-        })))
+            channel_manager_receiver,
+        })
+    }
+
+    pub async fn start(&mut self)-> ProxyResult<'static, ()> {
+        self.setup_connection().await?;
+        self.spawn_upstream_receiver()?;
+        self.spawn_upstream_sender()?;
+        Ok(())
     }
 
     // This function is used to setup the connection to the upstream
-    pub async fn setup_connection(self_: Arc<Mutex<Self>>) -> ProxyResult<'static, ()> {
-        let sender = self_.safe_lock(|s| s.sender.clone())?;
-        let receiver = self_.safe_lock(|s| s.receiver.clone())?;
+    pub async fn setup_connection(&mut self) -> ProxyResult<'static, ()> {
+        let sender = self.sender.clone();
+        let receiver = self.receiver.clone();
         // Get the `SetupConnection` message with Mining Device information (currently hard coded)
         let min_version = 2;
         let max_version = 2;
@@ -89,55 +99,12 @@ impl Upstream {
         };
         // Gets the message payload
         let payload = incoming.payload();
+        let self_mutex = Arc::new(Mutex::new(self.clone()));
         ParseCommonMessagesFromUpstream::handle_message_common(
-            self_.clone(),
+            self_mutex,
             message_type,
             payload,
         )?;
-
-        Ok(())
-    }
-
-    // This function is used to open an extended mining channel to the upstream
-    pub async fn open_extended_mining_channel(
-        &self,
-        request_id: u32,
-        user_identity: &str,
-        hash_rate: f32,
-        max_target: U256<'static>,
-        min_extranonce_size: u16,
-    ) -> ProxyResult<'static, ()> {
-        let open_extended_mining_channel = Message::Mining(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(OpenExtendedMiningChannel {
-            request_id,
-            user_identity: user_identity.to_string().try_into()?,
-            nominal_hash_rate: hash_rate,
-            max_target: max_target.into(),
-            min_extranonce_size,
-        }));
-        let sv2_frame: StdFrame = open_extended_mining_channel.try_into()?;
-        self.send_upstream(sv2_frame).await?;
-
-        Ok(())
-    }
-
-    // This function is used to submit shares to the upstream
-    pub async fn submit_shares_extended(&self, share: SubmitSharesExtended<'static>) -> ProxyResult<'static, ()> {
-        let submit_shares_extended = Message::Mining(roles_logic_sv2::parsers::Mining::SubmitSharesExtended(share));
-        let sv2_frame: StdFrame = submit_shares_extended.try_into()?;
-        self.send_upstream(sv2_frame).await?;
-
-        Ok(())
-    }
-
-    // This function is used to update the upstream when there is a change in downstream hashrate
-    pub async fn update_channel(&self, channel_id: u32, nominal_hash_rate: f32, maximum_target: U256<'static>) -> ProxyResult<'static, ()> {
-        let update_channel = Message::Mining(roles_logic_sv2::parsers::Mining::UpdateChannel(UpdateChannel {
-            channel_id,
-            nominal_hash_rate,
-            maximum_target,
-        }));
-        let sv2_frame: StdFrame = update_channel.try_into()?;
-        self.send_upstream(sv2_frame).await?;
 
         Ok(())
     }
@@ -150,12 +117,54 @@ impl Upstream {
                 self.channel_manager_sender.send(mining_message).await.map_err(|_| Error::ChannelErrorSender);
                 Ok(())
             }
+            Message::Common(common_message) => {
+                let self_mutex = Arc::new(Mutex::new(self.clone()));
+                // FIX THIS!
+                let frame: StdFrame = common_message.into();
+                let message_type = frame.get_header().unwrap().msg_type();
+                let payload = frame.payload();
+                ParseCommonMessagesFromUpstream::handle_message_common(
+                    self_mutex,
+                    message_type,
+                    payload,
+                );
+                Ok(())
+            }
             _ => {
                 error!("Received unknown message from upstream: {:?}", message);
                 Err(Error::UnexpectedMessage)
             }
         }
     }
+
+
+    /// Send a SV2 message to the Upstream role
+    pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
+        let either_frame = sv2_frame.into();
+        self.sender.send(either_frame).await?;
+        Ok(())
+    }
+
+    fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
+        tokio::spawn(async move {
+            while let Ok(frame) = self.receiver.recv().await {
+                let message = frame.try_into()?;
+                self.on_upstream_message(message).await?;
+            }
+        });
+        Ok(())
+    }
+
+    fn spawn_upstream_sender(&self) -> ProxyResult<'static, ()> {
+        tokio::spawn(async move {
+            while let Ok(message) = self.channel_manager_receiver.recv().await {
+                let sv2_frame: StdFrame = message.try_into()?;
+                self.send_upstream(sv2_frame).await?;
+            }
+        });
+        Ok(())
+    }
+
 
     // Creates the initial `SetupConnection` message for the SV2 handshake.
     //
@@ -188,12 +197,5 @@ impl Upstream {
             firmware,
             device_id,
         })
-    }
-
-    /// Send a SV2 message to the Upstream role
-    pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
-        let either_frame = sv2_frame.into();
-        self.sender.send(either_frame).await?;
-        Ok(())
     }
 }
