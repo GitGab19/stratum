@@ -16,20 +16,13 @@ pub mod downstream;
 pub mod sv2_to_sv1_utils;
 pub use downstream::Downstream;
 
-/// This constant defines a timeout duration. It is used to enforce
-/// that clients sending a `mining.subscribe` message must follow up
-/// with a `mining.authorize` within this period. This prevents
-/// resource exhaustion attacks where clients open connections
-/// with only `mining.subscribe` without intending to mine.
-const SUBSCRIBE_TIMEOUT_SECS: u64 = 10;
-
 /// The messages that are sent from the downstream handling logic
 /// to a central "Bridge" component for further processing.
 #[derive(Debug)]
 pub enum DownstreamMessages {
     /// Represents a submitted share from a downstream miner,
     /// wrapped with the relevant channel ID.
-    SubmitShares(SubmitShareWithChannelId)
+    SubmitShares(SubmitShareWithChannelId),
 }
 
 /// wrapper around a `mining.submit` with extra channel informationfor the Bridge to

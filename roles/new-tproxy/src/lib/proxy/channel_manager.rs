@@ -1,8 +1,10 @@
-use crate::{config::TranslatorConfig, downstream_sv1::{downstream::Downstream, DownstreamMessages}, error::Error, upstream_sv2::{upstream::{EitherFrame, StdFrame}, Upstream}};
-use roles_logic_sv2::{channels::client::extended::ExtendedChannel, handlers::mining::{ParseMiningMessagesFromUpstream, SendTo}, mining_sv2::{NewExtendedMiningJob, SubmitSharesExtended}, parsers::Mining, utils::{Id as IdFactory, Mutex}};
-use std::{sync::{Arc, RwLock}, collections::HashMap};
-use binary_sv2::U256;
+use crate::downstream_sv1::downstream::Downstream;
 use async_channel::{Receiver, Sender};
+use roles_logic_sv2::{channels::client::extended::ExtendedChannel, parsers::Mining, utils::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 pub type Sv2Message = Mining<'static>;
 
