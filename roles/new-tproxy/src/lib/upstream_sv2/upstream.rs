@@ -25,9 +25,9 @@ pub type EitherFrame = StandardEitherFrame<Message>;
 #[derive(Debug, Clone)]
 pub struct Upstream {
     /// Receiver for the SV2 Upstream role
-    pub receiver: Receiver<EitherFrame>,
+    pub upstream_receiver: Receiver<EitherFrame>,
     /// Sender for the SV2 Upstream role
-    pub sender: Sender<EitherFrame>,
+    pub upstream_sender: Sender<EitherFrame>,
     /// Sender for the ChannelManager thread
     pub channel_manager_sender: Sender<Mining<'static>>,
     /// Receiver for the ChannelManager thread
@@ -61,7 +61,7 @@ impl Upstream {
         };
 
         let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
-        let (receiver, sender) = Connection::new(socket, HandshakeRole::Initiator(initiator))
+        let (upstream_receiver, upstream_sender) = Connection::new(socket, HandshakeRole::Initiator(initiator))
             .await
             .map_err(|e| {
                 error!("Failed to establish Noise connection: {:?}", e);
@@ -72,8 +72,8 @@ impl Upstream {
         info!("Noise handshake with upstream completed.");
 
         Ok(Self {
-            receiver,
-            sender,
+            upstream_receiver,
+            upstream_sender,
             channel_manager_sender,
             channel_manager_receiver,
         })
@@ -94,8 +94,8 @@ impl Upstream {
     pub async fn setup_connection(&mut self) -> ProxyResult<'static, ()> {
         info!("Setting up SV2 connection with upstream.");
 
-        let sender = self.sender.clone();
-        let receiver = self.receiver.clone();
+        let sender = self.upstream_sender.clone();
+        let receiver = self.upstream_receiver.clone();
 
         let setup_connection = Self::get_setup_connection_message(2, 2, false)?;
         let sv2_frame: StdFrame = Message::Common(setup_connection.into()).try_into()?;
@@ -172,13 +172,6 @@ impl Upstream {
         }
     }
 
-    /// Sends a mining message to upstream.
-    pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
-        debug!("Sending message to upstream.");
-        let either_frame = sv2_frame.into();
-        self.sender.send(either_frame).await?;
-        Ok(())
-    }
 
     /// Spawns the upstream receiver task.
     fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
@@ -186,7 +179,7 @@ impl Upstream {
         let upstream = self.clone();
 
         tokio::spawn(async move {
-            while let Ok(mut frame) = upstream.receiver.recv().await {
+            while let Ok(mut frame) = upstream.upstream_receiver.recv().await {
                 debug!("Received frame from upstream.");
                 let message = message_from_frame(&mut frame);
 
@@ -221,6 +214,14 @@ impl Upstream {
             warn!("Upstream sender loop exited.");
         });
 
+        Ok(())
+    }
+
+    /// Sends a mining message to upstream.
+    pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
+        debug!("Sending message to upstream.");
+        let either_frame = sv2_frame.into();
+        self.upstream_sender.send(either_frame).await?;
         Ok(())
     }
 

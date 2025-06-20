@@ -4,7 +4,7 @@ use roles_logic_sv2::{
     mining_sv2::{
         NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget,
     },
-    Error as RolesLogicError,
+    Error as RolesLogicError, common_properties::{IsMiningUpstream, IsUpstream}, common_messages_sv2::Protocol,
 };
 
 impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
