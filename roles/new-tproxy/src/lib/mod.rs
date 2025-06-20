@@ -14,6 +14,7 @@
 use async_channel::unbounded;
 pub use roles_logic_sv2::utils::Mutex;
 use std::{net::SocketAddr, sync::Arc};
+use tracing::{error, info};
 
 pub use v1::server_to_client;
 
@@ -44,6 +45,7 @@ impl TranslatorSv2 {
     /// Initializes the translator with the given configuration and sets up
     /// the reconnect wait time.
     pub fn new(config: TranslatorConfig) -> Self {
+        info!("TranslatorSv2 created with config: {:?}", config);
         Self { config }
     }
 
@@ -52,19 +54,33 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
+        info!("Starting TranslatorSv2 service.");
+
         let (channel_manager_sender, channel_manager_receiver) = unbounded();
         let upstream_addr = SocketAddr::new(
             self.config.upstream_address.parse().unwrap(),
             self.config.upstream_port,
         );
-        let mut upstream = Upstream::new(
+
+        info!("Connecting to upstream at: {}", upstream_addr);
+
+        let mut upstream = match Upstream::new(
             upstream_addr,
             self.config.upstream_authority_pubkey,
             channel_manager_sender,
             channel_manager_receiver,
         )
         .await
-        .unwrap();
+        {
+            Ok(upstream) => {
+                info!("Successfully initialized upstream connection.");
+                upstream
+            }
+            Err(e) => {
+                error!("Failed to initialize upstream connection: {:?}", e);
+                return;
+            }
+        };
 
         let (upstream_sender, upstream_receiver) = unbounded();
         let channel_manager = ChannelManager::new(upstream_sender, upstream_receiver);
@@ -74,6 +90,9 @@ impl TranslatorSv2 {
             self.config.downstream_address.parse().unwrap(),
             self.config.downstream_port,
         );
+
+        info!("Starting downstream SV1 server at: {}", downstream_addr);
+
         let mut sv1_server = Sv1Server::new(
             Arc::new(Mutex::new(channel_manager)),
             downstream_sender,
@@ -81,10 +100,16 @@ impl TranslatorSv2 {
             downstream_addr,
         );
 
-        // Start the upstream.
-        _ = upstream.start().await;
+        info!("Starting upstream listener task.");
 
-        // Start the SV1 server.
-        _ = sv1_server.start().await;
+        if let Err(e) = upstream.start().await {
+            error!("Failed to start upstream listener: {:?}", e);
+            return;
+        }
+
+        info!("Starting downstream SV1 server listener.");
+        sv1_server.start().await;
+
+        info!("TranslatorSv2 service started successfully.");
     }
 }
