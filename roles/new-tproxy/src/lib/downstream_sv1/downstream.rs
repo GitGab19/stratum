@@ -28,7 +28,6 @@ pub struct Downstream {
     authorized_names: Vec<String>,
 }
 
-
 impl Downstream {
     pub fn new(
         downstream_id: u32,
@@ -135,7 +134,7 @@ impl IsServer<'static> for Downstream {
             "mining.set_difficulty".to_string(),
             self.downstream_id.to_string(),
         );
-        
+
         let notify_sub = (
             "mining.notify".to_string(),
             "ae6812eb4cd7735a302a8a9dd95cf71f".to_string(),
@@ -154,7 +153,8 @@ impl IsServer<'static> for Downstream {
         info!("Down: Submitting Share {:?}", request);
         debug!("Down: Handling mining.submit: {:?}", &request);
 
-        self.sv1_server_sender.try_send((self.downstream_id, request.clone().into()));
+        self.sv1_server_sender
+            .try_send((self.downstream_id, request.clone().into()));
 
         true
     }

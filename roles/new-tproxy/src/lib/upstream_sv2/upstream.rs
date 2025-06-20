@@ -61,13 +61,14 @@ impl Upstream {
         };
 
         let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
-        let (upstream_receiver, upstream_sender) = Connection::new(socket, HandshakeRole::Initiator(initiator))
-            .await
-            .map_err(|e| {
-                error!("Failed to establish Noise connection: {:?}", e);
-                e
-            })
-            .unwrap();
+        let (upstream_receiver, upstream_sender) =
+            Connection::new(socket, HandshakeRole::Initiator(initiator))
+                .await
+                .map_err(|e| {
+                    error!("Failed to establish Noise connection: {:?}", e);
+                    e
+                })
+                .unwrap();
 
         info!("Noise handshake with upstream completed.");
 
@@ -171,7 +172,6 @@ impl Upstream {
             }
         }
     }
-
 
     /// Spawns the upstream receiver task.
     fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
