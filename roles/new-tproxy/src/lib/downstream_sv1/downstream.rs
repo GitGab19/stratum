@@ -5,7 +5,7 @@ use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
     utils::Mutex,
 };
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 use v1::{
     client_to_server,
     error::Error,
@@ -40,43 +40,48 @@ impl Downstream {
     pub fn spawn_downstream_receiver(&self) {
         let downstream = self.clone();
         tokio::spawn(async move {
+            info!("Downstream receiver task started.");
             while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
-                downstream.sv1_server_sender.send(message).await.unwrap();
+                debug!("Received message from downstream: {:?}", message);
+                if let Err(e) = downstream.sv1_server_sender.send(message).await {
+                    error!("Failed to forward message to server: {:?}", e);
+                }
             }
+            warn!("Downstream receiver task ended.");
         });
     }
 
     pub fn spawn_downstream_sender(&self) {
         let downstream = self.clone();
         tokio::spawn(async move {
+            info!("Downstream sender task started.");
             while let Ok(message) = downstream.sv1_server_receiver.recv().await {
-                downstream
-                    .downstream_sv1_sender
-                    .send(message)
-                    .await
-                    .unwrap();
+                debug!("Sending message to downstream: {:?}", message);
+                if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
+                    error!("Failed to send message to downstream: {:?}", e);
+                }
             }
+            warn!("Downstream sender task ended.");
         });
     }
 
     pub fn handle_incoming_sv1_messages(&mut self) {
         todo!()
     }
-    /// Sends a SV1 JSON-RPC message to the downstream miner's socket writer task.
-    ///
-    /// This method is used to send response messages or notifications (like
-    /// `mining.notify` or `mining.set_difficulty`) to the connected miner.
-    /// The message is sent over the internal `tx_outgoing` channel, which is
-    /// read by the socket writer task responsible for serializing and writing
-    /// the message to the TCP stream.
+
     pub async fn send_message_downstream(
         self_: Arc<Mutex<Self>>,
         response: json_rpc::Message,
     ) -> Result<(), async_channel::SendError<v1::Message>> {
-        let sender = self_
-            .safe_lock(|s| s.downstream_sv1_sender.clone())
-            .unwrap();
-        debug!("To DOWN: {:?}", response);
+        let sender = match self_.safe_lock(|s| s.downstream_sv1_sender.clone()) {
+            Ok(sender) => sender,
+            Err(e) => {
+                error!("Failed to acquire downstream lock: {:?}", e);
+                return Err(async_channel::SendError(response));
+            }
+        };
+
+        debug!("Sending message to downstream via API: {:?}", response);
         sender.send(response).await
     }
 }
