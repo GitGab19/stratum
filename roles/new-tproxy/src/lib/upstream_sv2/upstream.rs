@@ -1,15 +1,23 @@
-use std::{net::SocketAddr, sync::Arc};
-use network_helpers_sv2::noise_connection::Connection;
-use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
-use roles_logic_sv2::{common_messages_sv2::{Protocol, SetupConnection}, handlers::common::ParseCommonMessagesFromUpstream, mining_sv2::{OpenExtendedMiningChannel, SubmitSharesExtended, UpdateChannel}, parsers::{AnyMessage, Mining}, utils::Mutex};
+use crate::{
+    error::{Error, ProxyResult},
+    utils::message_from_frame,
+};
 use async_channel::{Receiver, Sender};
-use tracing::error;
+use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
 use key_utils::Secp256k1PublicKey;
-use crate::error::{Error, ProxyResult};
+use network_helpers_sv2::noise_connection::Connection;
+use roles_logic_sv2::{
+    common_messages_sv2::{Protocol, SetupConnection},
+    handlers::common::ParseCommonMessagesFromUpstream,
+    parsers::{AnyMessage, Mining},
+    utils::Mutex,
+};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpStream,
     time::{sleep, Duration},
 };
+use tracing::error;
 pub type Message = AnyMessage<'static>;
 pub type StdFrame = StandardSv2Frame<Message>;
 pub type EitherFrame = StandardEitherFrame<Message>;
@@ -61,7 +69,7 @@ impl Upstream {
         })
     }
 
-    pub async fn start(&mut self)-> ProxyResult<'static, ()> {
+    pub async fn start(&mut self) -> ProxyResult<'static, ()> {
         self.setup_connection().await?;
         self.spawn_upstream_receiver()?;
         self.spawn_upstream_sender()?;
@@ -100,11 +108,7 @@ impl Upstream {
         // Gets the message payload
         let payload = incoming.payload();
         let self_mutex = Arc::new(Mutex::new(self.clone()));
-        ParseCommonMessagesFromUpstream::handle_message_common(
-            self_mutex,
-            message_type,
-            payload,
-        )?;
+        ParseCommonMessagesFromUpstream::handle_message_common(self_mutex, message_type, payload)?;
 
         Ok(())
     }
@@ -114,20 +118,23 @@ impl Upstream {
     pub async fn on_upstream_message(&self, message: Message) -> Result<(), Error> {
         match message {
             Message::Mining(mining_message) => {
-                self.channel_manager_sender.send(mining_message).await.map_err(|_| Error::ChannelErrorSender);
+                _ = self
+                    .channel_manager_sender
+                    .send(mining_message)
+                    .await
+                    .map_err(|_| Error::ChannelErrorSender);
                 Ok(())
             }
             Message::Common(common_message) => {
                 let self_mutex = Arc::new(Mutex::new(self.clone()));
-                // FIX THIS!
-                let frame: StdFrame = common_message.into();
+                let mut frame: StdFrame = AnyMessage::Common(common_message).try_into().unwrap();
                 let message_type = frame.get_header().unwrap().msg_type();
                 let payload = frame.payload();
                 ParseCommonMessagesFromUpstream::handle_message_common(
                     self_mutex,
                     message_type,
                     payload,
-                );
+                )?;
                 Ok(())
             }
             _ => {
@@ -137,7 +144,6 @@ impl Upstream {
         }
     }
 
-
     /// Send a SV2 message to the Upstream role
     pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
         let either_frame = sv2_frame.into();
@@ -146,25 +152,26 @@ impl Upstream {
     }
 
     fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
+        let upstream = self.clone();
         tokio::spawn(async move {
-            while let Ok(frame) = self.receiver.recv().await {
-                let message = frame.try_into()?;
-                self.on_upstream_message(message).await?;
+            while let Ok(mut frame) = upstream.receiver.recv().await {
+                let message = message_from_frame(&mut frame);
+                upstream.on_upstream_message(message).await.unwrap();
             }
         });
         Ok(())
     }
 
     fn spawn_upstream_sender(&self) -> ProxyResult<'static, ()> {
+        let upstream = self.clone();
         tokio::spawn(async move {
-            while let Ok(message) = self.channel_manager_receiver.recv().await {
-                let sv2_frame: StdFrame = message.try_into()?;
-                self.send_upstream(sv2_frame).await?;
+            while let Ok(message) = upstream.channel_manager_receiver.recv().await {
+                let sv2_frame: StdFrame = AnyMessage::Mining(message).try_into().unwrap();
+                upstream.send_upstream(sv2_frame).await.unwrap();
             }
         });
         Ok(())
     }
-
 
     // Creates the initial `SetupConnection` message for the SV2 handshake.
     //
