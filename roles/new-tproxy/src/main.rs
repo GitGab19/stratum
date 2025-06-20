@@ -2,7 +2,7 @@ mod args;
 use args::Args;
 use config::TranslatorConfig;
 use error::{Error, ProxyResult};
-pub use translator_sv2::{
+pub use new_translator_sv2::{
     config, downstream_sv1, error, proxy, status, upstream_sv2, TranslatorSv2,
 };
 
