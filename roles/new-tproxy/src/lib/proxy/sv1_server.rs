@@ -1,10 +1,16 @@
-use std::{net::SocketAddr, sync::Arc};
-use async_channel::{Sender, Receiver};
-use roles_logic_sv2::utils::{Mutex, Id as IdFactory};
-use tokio::net::TcpListener;
-use v1::{json_rpc, IsServer, client_to_server, server_to_client, utils::{Extranonce, HexU32Be}, error::Error};
-use crate::{proxy::ChannelManager, error::ProxyResult, downstream_sv1::Downstream};
+use crate::{downstream_sv1::Downstream, error::ProxyResult, proxy::ChannelManager};
+use async_channel::{Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
+use roles_logic_sv2::utils::{Id as IdFactory, Mutex};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::net::TcpListener;
+use v1::{
+    client_to_server,
+    error::Error,
+    json_rpc, server_to_client,
+    utils::{Extranonce, HexU32Be},
+    IsServer,
+};
 
 pub struct Sv1Server {
     channel_manager: Arc<Mutex<ChannelManager>>,
@@ -15,8 +21,13 @@ pub struct Sv1Server {
 }
 
 impl Sv1Server {
-    pub fn new(channel_manager: Arc<Mutex<ChannelManager>>, downstream_sender: Sender<json_rpc::Message>, downstream_receiver: Receiver<json_rpc::Message>, downstream_addr: SocketAddr) -> Self {
-        Self {  
+    pub fn new(
+        channel_manager: Arc<Mutex<ChannelManager>>,
+        downstream_sender: Sender<json_rpc::Message>,
+        downstream_receiver: Receiver<json_rpc::Message>,
+        downstream_addr: SocketAddr,
+    ) -> Self {
+        Self {
             channel_manager,
             downstream_sender,
             downstream_receiver,
@@ -25,20 +36,24 @@ impl Sv1Server {
         }
     }
 
-    pub fn start(&self) -> ProxyResult<'static, ()> {
-        let accept_connections = tokio::task::spawn({
-            async move {
-                let listener = TcpListener::bind(self.downstream_addr).await.unwrap();
-                while let Ok((stream, _)) = listener.accept().await {
-                    let connection = ConnectionSV1::new(stream).await;
-                    let downstream = Downstream::new(connection.sender(), connection.receiver(), self.downstream_sender, self.downstream_receiver);
-                    let downstream_id = self.downstream_id_factory.next();
-                    self.channel_manager.safe_lock(|s| s.downstreams.insert(downstream_id, Arc::new(Mutex::new(downstream))));
-                    downstream.spawn_downstream_receiver();
-                    downstream.spawn_downstream_sender();
-                }
-            }
-        });
+    pub async fn start(&mut self) -> ProxyResult<'static, ()> {
+        let listener = TcpListener::bind(self.downstream_addr).await.unwrap();
+        while let Ok((stream, _)) = listener.accept().await {
+            let connection = ConnectionSV1::new(stream).await;
+            let downstream = Downstream::new(
+                connection.sender(),
+                connection.receiver(),
+                self.downstream_sender.clone(),
+                self.downstream_receiver.clone(),
+            );
+            let downstream_id = self.downstream_id_factory.next();
+            self.channel_manager.safe_lock(|s| {
+                s.downstreams
+                    .insert(downstream_id, Arc::new(Mutex::new(downstream.clone())))
+            })?;
+            downstream.spawn_downstream_receiver();
+            downstream.spawn_downstream_sender();
+        }
         Ok(())
     }
 }
