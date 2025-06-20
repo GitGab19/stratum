@@ -4,6 +4,7 @@ use network_helpers_sv2::sv1_connection::ConnectionSV1;
 use roles_logic_sv2::utils::{Id as IdFactory, Mutex};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
+use tracing::{error, info, warn};
 use v1::{
     client_to_server,
     error::Error,
@@ -37,27 +38,46 @@ impl Sv1Server {
     }
 
     pub async fn start(&mut self) -> ProxyResult<'static, ()> {
-        let listener = TcpListener::bind(self.downstream_addr).await.unwrap();
-        while let Ok((stream, _)) = listener.accept().await {
-            let connection = ConnectionSV1::new(stream).await;
-            let downstream = Downstream::new(
-                connection.sender(),
-                connection.receiver(),
-                self.downstream_sender.clone(),
-                self.downstream_receiver.clone(),
-            );
-            let downstream_id = self.downstream_id_factory.next();
-            self.channel_manager.safe_lock(|s| {
-                s.downstreams
-                    .insert(downstream_id, Arc::new(Mutex::new(downstream.clone())))
-            })?;
-            downstream.spawn_downstream_receiver();
-            downstream.spawn_downstream_sender();
+        info!("Starting SV1 server on {}", self.downstream_addr);
+
+        let listener = TcpListener::bind(self.downstream_addr).await.map_err(|e| {
+            error!("Failed to bind to {}: {}", self.downstream_addr, e);
+            e
+        })?;
+
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    info!("New SV1 downstream connection from {}", addr);
+
+                    let connection = ConnectionSV1::new(stream).await;
+                    let downstream = Downstream::new(
+                        connection.sender(),
+                        connection.receiver(),
+                        self.downstream_sender.clone(),
+                        self.downstream_receiver.clone(),
+                    );
+
+                    let downstream_id = self.downstream_id_factory.next();
+                    if let Err(e) = self.channel_manager.safe_lock(|cm| {
+                        cm.downstreams
+                            .insert(downstream_id, Arc::new(Mutex::new(downstream.clone())))
+                    }) {
+                        error!("Failed to register downstream: {:?}", e);
+                        continue;
+                    }
+
+                    info!("Downstream {} registered successfully", downstream_id);
+                    downstream.spawn_downstream_receiver();
+                    downstream.spawn_downstream_sender();
+                }
+                Err(e) => {
+                    warn!("Failed to accept new connection: {:?}", e);
+                }
+            }
         }
-        Ok(())
     }
 }
-
 // Implements `IsServer` for `Sv1Server` to handle the SV1 messages.
 impl IsServer<'static> for Sv1Server {
     fn handle_configure(
