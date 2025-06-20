@@ -1,12 +1,18 @@
+use std::sync::{Arc, RwLock};
+
 use crate::{downstream_sv1::downstream::Downstream, proxy::ChannelManager};
 use roles_logic_sv2::{
+    channels::client::extended::ExtendedChannel,
+    common_messages_sv2::Protocol,
+    common_properties::{IsMiningUpstream, IsUpstream},
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
     mining_sv2::{
         NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget,
     },
-    Error as RolesLogicError, common_properties::{IsMiningUpstream, IsUpstream}, common_messages_sv2::Protocol,
+    parsers::Mining,
+    Error as RolesLogicError,
 };
-
+use tracing::{debug, info};
 impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     fn get_channel_type(&self) -> roles_logic_sv2::handlers::mining::SupportedChannelTypes {
         SupportedChannelTypes::Extended
@@ -27,21 +33,29 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: OpenExtendedMiningChannelSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        // let nominal_hashrate =
-        // self.proxy_config.downstream_difficulty_config.min_individual_miner_hashrate; let
-        // downstream = Downstream::new(m.request_id, "user_identity".to_string(), nominal_hashrate,
-        // self.upstream_sender.clone(), self.downstream_sv1_sender.clone(),
-        // m.extranonce_prefix.into_static().to_vec(), m.extranonce_size.into());
-        // self.downstreams.insert(m.request_id, Arc::new(Mutex::new(downstream)));
-
-        // let extranonce_prefix = m.extranonce_prefix.into_static().to_vec();
-        // let target = m.target.into_static();
-        // let version_rolling = true; // we assume this is always true on extended channels
-        // let extended_channel = ExtendedChannel::new(m.channel_id, "user_identity".to_string(),
-        // extranonce_prefix, target.into(), nominal_hashrate, version_rolling, m.extranonce_size);
-        // self.extended_channels.insert(m.channel_id, Arc::new(RwLock::new(extended_channel)));
-        // Ok(SendTo::None(Some(Mining::OpenExtendedMiningChannelSuccess(m))))
-        todo!()
+        let nominal_hashrate = 100000.0; //TODO
+        info!(
+            "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}",
+            m.request_id, m.channel_id
+        );
+        debug!("OpenStandardMiningChannelSuccess: {:?}", m);
+        info!("Up: Successfully Opened Extended Mining Channel");
+        let extranonce_prefix = m.extranonce_prefix.clone().into_static().to_vec();
+        let target = m.target.clone().into_static();
+        let version_rolling = true; // we assume this is always true on extended channels
+        let extended_channel = ExtendedChannel::new(
+            m.channel_id,
+            "user_identity".to_string(),
+            extranonce_prefix,
+            target.into(),
+            nominal_hashrate,
+            version_rolling,
+            m.extranonce_size,
+        );
+        self.extended_channels
+            .insert(m.channel_id, Arc::new(RwLock::new(extended_channel)));
+        let m = Mining::OpenExtendedMiningChannelSuccess(m.into_static());
+        Ok(SendTo::None(Some(m)))
     }
 
     fn handle_open_mining_channel_error(
