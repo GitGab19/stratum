@@ -158,53 +158,53 @@ pub async fn handle_error(
         Error::BadCliArgs => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::BadSerdeJson(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::BadConfigDeserialize(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::BinarySv2(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::CodecNoise(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::FramingSv2(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::InvalidExtranonce(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::Io(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::ParseInt(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::RolesSv2Logic(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::UpstreamIncoming(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::V1Protocol(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::SubprotocolMining(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::PoisonLock => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::ChannelErrorReceiver(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::TokioChannelErrorRecv(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::ChannelErrorSender(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::SetDifficultyToMessage(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::Infallible(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
         Error::Sv2ProtocolError(ref inner) => {
-                match inner {
-                    // dont notify main thread just continue
-                    roles_logic_sv2::parsers::Mining::SubmitSharesError(_) => {
-                        error_handling::ErrorBranch::Continue
-                    }
-                    _ => send_status(sender, e, error_handling::ErrorBranch::Break).await,
+            match inner {
+                // dont notify main thread just continue
+                roles_logic_sv2::parsers::Mining::SubmitSharesError(_) => {
+                    error_handling::ErrorBranch::Continue
                 }
+                _ => send_status(sender, e, error_handling::ErrorBranch::Break).await,
             }
+        }
         Error::TargetError(_) => {
-                send_status(sender, e, error_handling::ErrorBranch::Continue).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Continue).await
+        }
         Error::Sv1MessageTooLong => {
-                send_status(sender, e, error_handling::ErrorBranch::Break).await
-            }
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
         Error::UnexpectedMessage => todo!(),
-            }
+    }
 }

@@ -1,6 +1,12 @@
-use roles_logic_sv2::{common_messages_sv2::{ChannelEndpointChanged, Reconnect, SetupConnectionError, SetupConnectionSuccess}, handlers::common::{ParseCommonMessagesFromUpstream, SendTo as SendToCommon}, Error};
-use tracing::info;
 use crate::upstream_sv2::Upstream;
+use roles_logic_sv2::{
+    common_messages_sv2::{
+        ChannelEndpointChanged, Reconnect, SetupConnectionError, SetupConnectionSuccess,
+    },
+    handlers::common::{ParseCommonMessagesFromUpstream, SendTo as SendToCommon},
+    Error,
+};
+use tracing::info;
 
 impl ParseCommonMessagesFromUpstream for Upstream {
     fn handle_setup_connection_success(
@@ -14,18 +20,21 @@ impl ParseCommonMessagesFromUpstream for Upstream {
         Ok(SendToCommon::None(None))
     }
 
-    fn handle_setup_connection_error(&mut self, m: SetupConnectionError) -> Result<SendToCommon, Error> {
+    fn handle_setup_connection_error(
+        &mut self,
+        _m: SetupConnectionError,
+    ) -> Result<SendToCommon, Error> {
         todo!()
     }
 
     fn handle_channel_endpoint_changed(
         &mut self,
-        m: ChannelEndpointChanged,
+        _m: ChannelEndpointChanged,
     ) -> Result<SendToCommon, Error> {
         todo!()
     }
 
-    fn handle_reconnect(&mut self, m: Reconnect) -> Result<SendToCommon, Error> {
+    fn handle_reconnect(&mut self, _m: Reconnect) -> Result<SendToCommon, Error> {
         todo!()
     }
 }

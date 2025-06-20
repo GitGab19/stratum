@@ -10,28 +10,20 @@
 //! provides the `start` method as the main entry point for running the translator service.
 //! It relies on several sub-modules (`config`, `downstream_sv1`, `upstream_sv2`, `proxy`, `status`,
 //! etc.) for specialized functionalities.
-use async_channel::{bounded, unbounded};
-use futures::FutureExt;
-use rand::Rng;
+#![allow(warnings)]
+use async_channel::unbounded;
 pub use roles_logic_sv2::utils::Mutex;
-use status::Status;
-use std::{
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
+use tracing::{error, info};
 
-use tokio::{
-    select,
-    sync::{broadcast, Notify},
-    task::{self, AbortHandle},
-};
-use tracing::{debug, error, info, warn};
 pub use v1::server_to_client;
 
 use config::TranslatorConfig;
 
-use crate::{status::State, upstream_sv2::Upstream, proxy::{ChannelManager, sv1_server::Sv1Server}};
+use crate::{
+    proxy::{sv1_server::Sv1Server, ChannelManager},
+    upstream_sv2::Upstream,
+};
 
 pub mod config;
 pub mod downstream_sv1;
@@ -53,9 +45,8 @@ impl TranslatorSv2 {
     /// Initializes the translator with the given configuration and sets up
     /// the reconnect wait time.
     pub fn new(config: TranslatorConfig) -> Self {
-        Self {
-            config,
-        }
+        info!("TranslatorSv2 created with config: {:?}", config);
+        Self { config }
     }
 
     /// Starts the translator.
@@ -63,17 +54,33 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
+        info!("Starting TranslatorSv2 service.");
+
         let (channel_manager_sender, channel_manager_receiver) = unbounded();
         let upstream_addr = SocketAddr::new(
             self.config.upstream_address.parse().unwrap(),
             self.config.upstream_port,
         );
-        let mut upstream = Upstream::new(
+
+        info!("Connecting to upstream at: {}", upstream_addr);
+
+        let mut upstream = match Upstream::new(
             upstream_addr,
             self.config.upstream_authority_pubkey,
             channel_manager_sender,
-            channel_manager_receiver
-        ).await.unwrap();
+            channel_manager_receiver,
+        )
+        .await
+        {
+            Ok(upstream) => {
+                info!("Successfully initialized upstream connection.");
+                upstream
+            }
+            Err(e) => {
+                error!("Failed to initialize upstream connection: {:?}", e);
+                return;
+            }
+        };
 
         let (upstream_sender, upstream_receiver) = unbounded();
         let channel_manager = ChannelManager::new(upstream_sender, upstream_receiver);
@@ -83,14 +90,26 @@ impl TranslatorSv2 {
             self.config.downstream_address.parse().unwrap(),
             self.config.downstream_port,
         );
-        let sv1_server = Sv1Server::new(Arc::new(Mutex::new(channel_manager)), downstream_sender, downstream_receiver, downstream_addr);
-        
-        // Start the upstream.
-        upstream.start().await.unwrap();
 
-        // Start the SV1 server.
-        sv1_server.start().unwrap();
+        info!("Starting downstream SV1 server at: {}", downstream_addr);
+
+        let mut sv1_server = Sv1Server::new(
+            Arc::new(Mutex::new(channel_manager)),
+            downstream_sender,
+            downstream_receiver,
+            downstream_addr,
+        );
+
+        info!("Starting upstream listener task.");
+
+        if let Err(e) = upstream.start().await {
+            error!("Failed to start upstream listener: {:?}", e);
+            return;
+        }
+
+        info!("Starting downstream SV1 server listener.");
+        sv1_server.start().await;
+
+        info!("TranslatorSv2 service started successfully.");
     }
-
 }
-

@@ -1,14 +1,20 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
-use async_channel::{Sender, Receiver};
-use binary_sv2::u256_from_int;
-use roles_logic_sv2::{common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream}, job_creator::extended_job_to_non_segwit, mining_sv2::{NewExtendedMiningJob, SetNewPrevHash, Target}, utils::Mutex};
-use tokio::net::TcpListener;
-use tracing::debug;
-use v1::{client_to_server, error::Error, json_rpc, server_to_client, utils::{Extranonce, HexU32Be, MerkleNode, PrevHash}, IsServer};
-use crate::{downstream_sv1::DownstreamMessages, error::ProxyResult, proxy::ChannelManager};
+use async_channel::{Receiver, Sender};
+use roles_logic_sv2::{
+    common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
+    utils::Mutex,
+};
+use tracing::{debug, error, info, warn};
+use v1::{
+    client_to_server,
+    error::Error,
+    json_rpc, server_to_client,
+    utils::{Extranonce, HexU32Be},
+    IsServer,
+};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Downstream {
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
@@ -17,42 +23,65 @@ pub struct Downstream {
 }
 
 impl Downstream {
-    pub fn new(downstream_sv1_sender: Sender<json_rpc::Message>, downstream_sv1_receiver: Receiver<json_rpc::Message>, sv1_server_sender: Sender<json_rpc::Message>, sv1_server_receiver: Receiver<json_rpc::Message>) -> Self {
-        Self { downstream_sv1_sender, downstream_sv1_receiver, sv1_server_sender, sv1_server_receiver }
+    pub fn new(
+        downstream_sv1_sender: Sender<json_rpc::Message>,
+        downstream_sv1_receiver: Receiver<json_rpc::Message>,
+        sv1_server_sender: Sender<json_rpc::Message>,
+        sv1_server_receiver: Receiver<json_rpc::Message>,
+    ) -> Self {
+        Self {
+            downstream_sv1_sender,
+            downstream_sv1_receiver,
+            sv1_server_sender,
+            sv1_server_receiver,
+        }
     }
 
     pub fn spawn_downstream_receiver(&self) {
+        let downstream = self.clone();
         tokio::spawn(async move {
-            while let Ok(message) = self.downstream_sv1_receiver.recv().await {
-                self.sv1_server_sender.send(message).await.unwrap();
+            info!("Downstream receiver task started.");
+            while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
+                debug!("Received message from downstream: {:?}", message);
+                if let Err(e) = downstream.sv1_server_sender.send(message).await {
+                    error!("Failed to forward message to server: {:?}", e);
+                }
             }
+            warn!("Downstream receiver task ended.");
         });
     }
 
     pub fn spawn_downstream_sender(&self) {
+        let downstream = self.clone();
         tokio::spawn(async move {
-            while let Ok(message) = self.sv1_server_receiver.recv().await {
-                self.downstream_sv1_sender.send(message).await.unwrap();
+            info!("Downstream sender task started.");
+            while let Ok(message) = downstream.sv1_server_receiver.recv().await {
+                debug!("Sending message to downstream: {:?}", message);
+                if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
+                    error!("Failed to send message to downstream: {:?}", e);
+                }
             }
+            warn!("Downstream sender task ended.");
         });
     }
 
     pub fn handle_incoming_sv1_messages(&mut self) {
         todo!()
     }
-    /// Sends a SV1 JSON-RPC message to the downstream miner's socket writer task.
-    ///
-    /// This method is used to send response messages or notifications (like
-    /// `mining.notify` or `mining.set_difficulty`) to the connected miner.
-    /// The message is sent over the internal `tx_outgoing` channel, which is
-    /// read by the socket writer task responsible for serializing and writing
-    /// the message to the TCP stream.
+
     pub async fn send_message_downstream(
         self_: Arc<Mutex<Self>>,
         response: json_rpc::Message,
     ) -> Result<(), async_channel::SendError<v1::Message>> {
-        let sender = self_.safe_lock(|s| s.downstream_sv1_sender.clone()).unwrap();
-        debug!("To DOWN: {:?}", response);
+        let sender = match self_.safe_lock(|s| s.downstream_sv1_sender.clone()) {
+            Ok(sender) => sender,
+            Err(e) => {
+                error!("Failed to acquire downstream lock: {:?}", e);
+                return Err(async_channel::SendError(response));
+            }
+        };
+
+        debug!("Sending message to downstream via API: {:?}", response);
         sender.send(response).await
     }
 }
