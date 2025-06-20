@@ -57,6 +57,11 @@ impl TranslatorSv2 {
         info!("Starting TranslatorSv2 service.");
 
         let (channel_manager_sender, channel_manager_receiver) = unbounded();
+
+        let (sv1_server_sender, sv1_server_receiver) = unbounded();
+
+        let (channel_opener_sender, channel_opener_receiver) = unbounded();
+
         let upstream_addr = SocketAddr::new(
             self.config.upstream_address.parse().unwrap(),
             self.config.upstream_port,
@@ -83,7 +88,12 @@ impl TranslatorSv2 {
         };
 
         let (upstream_sender, upstream_receiver) = unbounded();
-        let channel_manager = ChannelManager::new(upstream_sender, upstream_receiver);
+        let channel_manager = ChannelManager::new(
+            upstream_sender,
+            upstream_receiver,
+            sv1_server_sender,
+            channel_opener_receiver,
+        );
 
         let (downstream_sender, downstream_receiver) = unbounded();
         let downstream_addr: SocketAddr = SocketAddr::new(
@@ -98,6 +108,8 @@ impl TranslatorSv2 {
             downstream_sender,
             downstream_receiver,
             downstream_addr,
+            sv1_server_receiver,
+            channel_opener_sender,
         );
 
         info!("Starting upstream listener task.");
