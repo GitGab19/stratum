@@ -3,29 +3,33 @@ use std::sync::Arc;
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
+    mining_sv2::SetNewPrevHash,
     utils::Mutex,
 };
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use v1::{
     client_to_server::{self, Submit},
     error::Error,
     json_rpc, server_to_client,
-    utils::{Extranonce, HexU32Be},
+    utils::{Extranonce, HexU32Be, PrevHash},
     IsServer,
 };
 
 #[derive(Debug, Clone)]
 pub struct Downstream {
-    downstream_id: u32,
+    pub downstream_id: u32,
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
-    sv1_server_sender: Sender<(u32, json_rpc::Message)>,
-    sv1_server_receiver: Receiver<(u32, json_rpc::Message)>,
-    extranonce1: Vec<u8>,
-    extranonce2_len: usize,
+    downstream_to_sv1_server_sender: Sender<(u32, json_rpc::Message)>,
+    sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
+    pub extranonce1: Vec<u8>,
+    pub extranonce2_len: usize,
     version_rolling_mask: Option<HexU32Be>,
     version_rolling_min_bit: Option<HexU32Be>,
     authorized_names: Vec<String>,
+    pub prevhash: Option<SetNewPrevHash<'static>>,
+    pub clean_job: bool,
 }
 
 impl Downstream {
@@ -33,20 +37,23 @@ impl Downstream {
         downstream_id: u32,
         downstream_sv1_sender: Sender<json_rpc::Message>,
         downstream_sv1_receiver: Receiver<json_rpc::Message>,
-        sv1_server_sender: Sender<(u32, json_rpc::Message)>,
-        sv1_server_receiver: Receiver<(u32, json_rpc::Message)>,
+        downstream_to_sv1_server_sender: Sender<(u32, json_rpc::Message)>,
+        sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
+        prevhash: Option<SetNewPrevHash<'static>>,
     ) -> Self {
         Self {
             downstream_id,
             downstream_sv1_sender,
             downstream_sv1_receiver,
-            sv1_server_sender,
-            sv1_server_receiver,
+            downstream_to_sv1_server_sender,
+            sv1_server_to_downstream_receiver,
             extranonce1: vec![0; 8],
             extranonce2_len: 0,
             version_rolling_mask: None,
             version_rolling_min_bit: None,
             authorized_names: Vec::new(),
+            prevhash,
+            clean_job: true,
         }
     }
 
@@ -57,9 +64,9 @@ impl Downstream {
             while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
                 debug!("Received message from downstream: {:?}", message);
                 let response = downstream.handle_message(message);
-                /*if let Err(e) = downstream.sv1_server_sender.send((downstream.downstream_id, message)).await {
-                    error!("Failed to forward message to server: {:?}", e);
-                }*/
+                if let Ok(Some(msg)) = response {
+                    downstream.downstream_sv1_sender.send(msg.into());
+                }
             }
             warn!("Downstream receiver task ended.");
         });
@@ -69,10 +76,17 @@ impl Downstream {
         let downstream = self.clone();
         tokio::spawn(async move {
             info!("Downstream sender task started.");
-            while let Ok(message) = downstream.sv1_server_receiver.recv().await {
-                debug!("Sending message to downstream: {:?}", message);
-                if let Err(e) = downstream.downstream_sv1_sender.send(message.1).await {
-                    error!("Failed to send message to downstream: {:?}", e);
+            let mut sv1_server_to_downstream_receiver =
+                downstream.sv1_server_to_downstream_receiver.subscribe();
+            while let Ok((downstream_id, message)) = sv1_server_to_downstream_receiver.recv().await
+            {
+                error!("{downstream_id}");
+                error!("{message}");
+                if downstream_id == downstream.downstream_id {
+                    debug!("Sending message to downstream: {:?}", message);
+                    if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
+                        error!("Failed to send message to downstream: {:?}", e);
+                    }
                 }
             }
             warn!("Downstream sender task ended.");
@@ -153,7 +167,7 @@ impl IsServer<'static> for Downstream {
         info!("Down: Submitting Share {:?}", request);
         debug!("Down: Handling mining.submit: {:?}", &request);
 
-        self.sv1_server_sender
+        self.downstream_to_sv1_server_sender
             .try_send((self.downstream_id, request.clone().into()));
 
         true
