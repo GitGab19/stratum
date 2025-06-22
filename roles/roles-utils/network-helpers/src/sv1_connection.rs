@@ -56,7 +56,7 @@ impl ConnectionSV1 {
                                 break tracing::error!("Error reading from stream: {:?}", e);
                             }
                             None => {
-                                tracing::error!("No message received");
+                                // tracing::error!("No message received");
                             }
                         }
                     },
