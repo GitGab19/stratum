@@ -29,9 +29,9 @@ pub struct Upstream {
     /// Sender for the SV2 Upstream role
     pub upstream_sender: Sender<EitherFrame>,
     /// Sender for the ChannelManager thread
-    pub channel_manager_sender: Sender<Mining<'static>>,
+    pub upstream_to_channel_manager_sender: Sender<EitherFrame>,
     /// Receiver for the ChannelManager thread
-    pub channel_manager_receiver: Receiver<Mining<'static>>,
+    pub channel_manager_to_upstream_receiver: Receiver<EitherFrame>,
 }
 
 impl Upstream {
@@ -39,8 +39,8 @@ impl Upstream {
     pub async fn new(
         upstream_address: SocketAddr,
         upstream_authority_public_key: Secp256k1PublicKey,
-        channel_manager_sender: Sender<Mining<'static>>,
-        channel_manager_receiver: Receiver<Mining<'static>>,
+        upstream_to_channel_manager_sender: Sender<EitherFrame>,
+        channel_manager_to_upstream_receiver: Receiver<EitherFrame>,
     ) -> ProxyResult<'static, Self> {
         info!("Attempting to connect to upstream at {}", upstream_address);
 
@@ -61,6 +61,7 @@ impl Upstream {
         };
 
         let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
+        info!("I am the initiator");
         let (upstream_receiver, upstream_sender) =
             Connection::new(socket, HandshakeRole::Initiator(initiator))
                 .await
@@ -75,8 +76,8 @@ impl Upstream {
         Ok(Self {
             upstream_receiver,
             upstream_sender,
-            channel_manager_sender,
-            channel_manager_receiver,
+            upstream_to_channel_manager_sender,
+            channel_manager_to_upstream_receiver,
         })
     }
 
@@ -135,42 +136,12 @@ impl Upstream {
         Ok(())
     }
 
-    pub async fn on_upstream_message(&self, message: Message) -> Result<(), Error> {
-        match message {
-            Message::Mining(mining_message) => {
-                debug!(
-                    "Forwarding mining message to channel manager: {:?}",
-                    mining_message
-                );
-                self.channel_manager_sender
-                    .send(mining_message)
-                    .await
-                    .map_err(|_| Error::ChannelErrorSender);
-                Ok(())
-            }
-            Message::Common(common_message) => {
-                debug!("Handling common message from upstream.");
-                let self_mutex = Arc::new(Mutex::new(self.clone()));
-                let mut frame: StdFrame =
-                    AnyMessage::Common(common_message).try_into().map_err(|e| {
-                        error!("Failed to parse common message: {:?}", e);
-                        e
-                    })?;
-                let message_type = frame.get_header().unwrap().msg_type();
-                let payload = frame.payload();
-
-                ParseCommonMessagesFromUpstream::handle_message_common(
-                    self_mutex,
-                    message_type,
-                    payload,
-                )?;
-                Ok(())
-            }
-            _ => {
-                warn!("Received unknown message type from upstream: {:?}", message);
-                Err(Error::UnexpectedMessage)
-            }
-        }
+    pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), Error> {
+        self.upstream_to_channel_manager_sender
+            .send(message)
+            .await
+            .map_err(|_| Error::ChannelErrorSender);
+        Ok(())
     }
 
     /// Spawns the upstream receiver task.
@@ -179,10 +150,8 @@ impl Upstream {
         let upstream = self.clone();
 
         tokio::spawn(async move {
-            while let Ok(mut frame) = upstream.upstream_receiver.recv().await {
+            while let Ok(message) = upstream.upstream_receiver.recv().await {
                 debug!("Received frame from upstream.");
-                let message = message_from_frame(&mut frame);
-
                 if let Err(e) = upstream.on_upstream_message(message).await {
                     error!("Error while processing upstream message: {:?}", e);
                 }
@@ -200,13 +169,9 @@ impl Upstream {
         let upstream = self.clone();
 
         tokio::spawn(async move {
-            while let Ok(message) = upstream.channel_manager_receiver.recv().await {
+            while let Ok(message) = upstream.channel_manager_to_upstream_receiver.recv().await {
                 debug!("Received message from channel manager to send upstream.");
-                let sv2_frame: StdFrame = AnyMessage::Mining(message)
-                    .try_into()
-                    .expect("Failed to serialize mining message.");
-
-                if let Err(e) = upstream.send_upstream(sv2_frame).await {
+                if let Err(e) = upstream.send_upstream(message.try_into().unwrap()).await {
                     error!("Failed to send message upstream: {:?}", e);
                 }
             }
@@ -218,7 +183,7 @@ impl Upstream {
     }
 
     /// Sends a mining message to upstream.
-    pub async fn send_upstream(&self, sv2_frame: StdFrame) -> ProxyResult<'static, ()> {
+    pub async fn send_upstream(&self, sv2_frame: EitherFrame) -> ProxyResult<'static, ()> {
         debug!("Sending message to upstream.");
         let either_frame = sv2_frame.into();
         self.upstream_sender.send(either_frame).await?;
