@@ -18,7 +18,9 @@ pub fn proxy_extranonce1_len(
     channel_extranonce2_size - downstream_extranonce2_len
 }
 
-pub fn message_from_frame(frame: &mut Frame<AnyMessage<'static>, Slice>) -> AnyMessage<'static> {
+pub fn message_from_frame(
+    frame: &mut Frame<AnyMessage<'static>, Slice>,
+) -> (u8, Vec<u8>, AnyMessage<'static>) {
     match frame {
         Frame::Sv2(frame) => {
             if let Some(header) = frame.get_header() {
@@ -29,7 +31,7 @@ pub fn message_from_frame(frame: &mut Frame<AnyMessage<'static>, Slice>) -> AnyM
                 match message {
                     Ok(message) => {
                         let message = into_static(message);
-                        message
+                        (message_type, payload.to_vec(), message)
                     }
                     _ => {
                         println!("Received frame with invalid payload or message type: {frame:?}");

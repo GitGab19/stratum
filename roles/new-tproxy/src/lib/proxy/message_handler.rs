@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use crate::{downstream_sv1::downstream::Downstream, proxy::ChannelManager};
 use roles_logic_sv2::{
     channels::client::extended::ExtendedChannel,
-    common_messages_sv2::Protocol,
+    common_messages_sv2::{Protocol, SetupConnectionSuccess},
     common_properties::{IsMiningUpstream, IsUpstream},
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
     mining_sv2::{
@@ -12,7 +12,14 @@ use roles_logic_sv2::{
     parsers::Mining,
     Error as RolesLogicError,
 };
-use tracing::{debug, info};
+
+use roles_logic_sv2::{
+    common_messages_sv2::{ChannelEndpointChanged, Reconnect, SetupConnectionError},
+    handlers::common::{ParseCommonMessagesFromUpstream, SendTo as SendToCommon},
+    Error,
+};
+
+use tracing::{debug, error, info};
 impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     fn get_channel_type(&self) -> roles_logic_sv2::handlers::mining::SupportedChannelTypes {
         SupportedChannelTypes::Extended
@@ -62,21 +69,34 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: roles_logic_sv2::mining_sv2::OpenMiningChannelError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        error!(
+            "Received OpenExtendedMiningChannelError with error code {}",
+            std::str::from_utf8(m.error_code.as_ref()).unwrap_or("unknown error code")
+        );
+        Ok(SendTo::None(Some(Mining::OpenMiningChannelError(
+            m.as_static(),
+        ))))
     }
 
     fn handle_update_channel_error(
         &mut self,
         m: roles_logic_sv2::mining_sv2::UpdateChannelError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        error!(
+            "Received UpdateChannelError with error code {}",
+            std::str::from_utf8(m.error_code.as_ref()).unwrap_or("unknown error code")
+        );
+        Ok(SendTo::None(Some(Mining::UpdateChannelError(
+            m.as_static(),
+        ))))
     }
 
     fn handle_close_channel(
         &mut self,
         m: roles_logic_sv2::mining_sv2::CloseChannel,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        info!("Received CloseChannel for channel id: {}", m.channel_id);
+        Ok(SendTo::None(Some(Mining::CloseChannel(m.as_static()))))
     }
 
     fn handle_set_extranonce_prefix(
@@ -90,14 +110,20 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: roles_logic_sv2::mining_sv2::SubmitSharesSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        info!("Received SubmitSharesSuccess");
+        debug!("SubmitSharesSuccess: {:?}", m);
+        Ok(SendTo::None(Some(Mining::SubmitSharesSuccess(
+            m.into_static(),
+        ))))
     }
 
     fn handle_submit_shares_error(
         &mut self,
         m: roles_logic_sv2::mining_sv2::SubmitSharesError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        Ok(SendTo::None(Some(Mining::SubmitSharesError(
+            m.into_static(),
+        ))))
     }
 
     fn handle_new_mining_job(
@@ -111,20 +137,26 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: NewExtendedMiningJob,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        // let mut channel = self.extended_channels.get(&m.channel_id).unwrap().write().unwrap();
-        // channel.on_new_extended_mining_job(m);
-        // Ok(SendTo::None(Some(Mining::NewExtendedMiningJob(m))))
-        todo!()
+        let m_static = m.clone().into_static();
+        if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
+            let mut channel = channel.write().unwrap();
+            channel.on_new_extended_mining_job(m_static.clone());
+            return Ok(SendTo::None(Some(Mining::NewExtendedMiningJob(m_static))));
+        }
+        Ok(SendTo::None(None))
     }
 
     fn handle_set_new_prev_hash(
         &mut self,
         m: SetNewPrevHash,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        // let mut channel = self.extended_channels.get(&m.channel_id).unwrap().write().unwrap();
-        // channel.on_set_new_prev_hash(m);
-        // Ok(SendTo::None(None))
-        todo!()
+        let m_static = m.clone().into_static();
+        if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
+            let mut channel = channel.write().unwrap();
+            channel.on_set_new_prev_hash(m_static.clone());
+            return Ok(SendTo::None(Some(Mining::SetNewPrevHash(m_static))));
+        }
+        Ok(SendTo::None(None))
     }
 
     fn handle_set_custom_mining_job_success(
@@ -142,7 +174,14 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     }
 
     fn handle_set_target(&mut self, m: SetTarget) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        let mut extended_channel = self
+            .extended_channels
+            .get(&m.channel_id)
+            .unwrap()
+            .write()
+            .unwrap();
+        extended_channel.set_target(m.maximum_target.clone().into());
+        Ok(SendTo::None(Some(Mining::SetTarget(m.into_static()))))
     }
 
     fn handle_set_group_channel(
@@ -150,5 +189,36 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         _m: roles_logic_sv2::mining_sv2::SetGroupChannel,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!()
+    }
+}
+
+impl ParseCommonMessagesFromUpstream for ChannelManager {
+    fn handle_setup_connection_success(
+        &mut self,
+        m: SetupConnectionSuccess,
+    ) -> Result<SendToCommon, Error> {
+        info!(
+            "Received `SetupConnectionSuccess`: version={}, flags={:b}",
+            m.used_version, m.flags
+        );
+        Ok(SendToCommon::None(None))
+    }
+
+    fn handle_setup_connection_error(
+        &mut self,
+        _m: SetupConnectionError,
+    ) -> Result<SendToCommon, Error> {
+        todo!()
+    }
+
+    fn handle_channel_endpoint_changed(
+        &mut self,
+        _m: ChannelEndpointChanged,
+    ) -> Result<SendToCommon, Error> {
+        todo!()
+    }
+
+    fn handle_reconnect(&mut self, _m: Reconnect) -> Result<SendToCommon, Error> {
+        todo!()
     }
 }
