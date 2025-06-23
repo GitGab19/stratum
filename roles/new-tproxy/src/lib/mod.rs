@@ -116,7 +116,8 @@ impl TranslatorSv2 {
             sv1_server_to_channel_manager_sender,
         );
 
-        ChannelManager::on_upstream_message(channel_manager).await;
+        ChannelManager::on_upstream_message(channel_manager.clone()).await;
+        ChannelManager::handle_downstream_message(channel_manager).await;
 
         info!("Starting upstream listener task.");
 

@@ -2,7 +2,7 @@ use crate::{
     downstream_sv1::{
         downstream,
         sv2_to_sv1_utils::{create_notify, get_set_difficulty},
-        Downstream,
+        Downstream, DownstreamMessages,
     },
     error::ProxyResult,
     proxy::ChannelManager,
@@ -11,7 +11,7 @@ use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
 use roles_logic_sv2::{
     bitcoin::secp256k1::Message,
-    mining_sv2::SetNewPrevHash,
+    mining_sv2::{SetNewPrevHash, SubmitSharesExtended},
     parsers::Mining,
     utils::{Id as IdFactory, Mutex},
 };
@@ -33,13 +33,13 @@ pub struct Sv1Server {
     downstream_id_factory: IdFactory,
     sv1_server_to_downstream_sender: broadcast::Sender<(u32, json_rpc::Message)>,
     sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, json_rpc::Message)>,
-    downstream_to_sv1_server_sender: Sender<(u32, json_rpc::Message)>,
-    downstream_to_sv1_server_receiver: Receiver<(u32, json_rpc::Message)>,
+    downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
+    downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
     downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
     prevhash: Arc<Mutex<Option<SetNewPrevHash<'static>>>>,
     listener_addr: SocketAddr,
     channel_manager_to_sv1_server_receiver: broadcast::Sender<Mining<'static>>,
-    sv1_server_to_channel_manager_sender: Sender<Mining<'static>>,
+    sv1_server_to_channel_manager_sender: Sender<(u32, Mining<'static>)>,
     channel_opener_sender: Sender<(u32, String)>,
 }
 
@@ -50,7 +50,7 @@ impl Sv1Server {
         listener_addr: SocketAddr,
         channel_opener_sender: Sender<(u32, String)>,
         channel_manager_to_sv1_server_receiver: broadcast::Sender<Mining<'static>>,
-        sv1_server_to_channel_manager_sender: Sender<Mining<'static>>,
+        sv1_server_to_channel_manager_sender: Sender<(u32, Mining<'static>)>,
     ) -> Self {
         let (sv1_server_to_downstream_sender, sv1_server_to_downstream_receiver) =
             broadcast::channel(10);
@@ -74,6 +74,7 @@ impl Sv1Server {
         info!("Starting SV1 server on {}", self.listener_addr);
         tokio::spawn(Self::handle_downstream_message(
             self.downstream_to_sv1_server_receiver.clone(),
+            self.sv1_server_to_channel_manager_sender.clone(),
         ));
         tokio::spawn(Self::handle_upstream_message(
             self.channel_manager_to_sv1_server_receiver.subscribe(),
@@ -107,7 +108,6 @@ impl Sv1Server {
                         .bootstrap_non_aggregation(connection, &mut downstream)
                         .await?;
                     if let Some(channel_id) = channel_id {
-                        error!("Channel_id: {:?}", channel_id);
                         self.downstreams.safe_lock(|d| {
                             d.insert(channel_id, Arc::new(Mutex::new(downstream.clone())))
                         });
@@ -125,13 +125,39 @@ impl Sv1Server {
     }
 
     pub async fn handle_downstream_message(
-        mut downstream_to_sv1_server_receiver: Receiver<(u32, json_rpc::Message)>,
+        mut downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
+        sv1_server_to_channel_manager_sender: Sender<(u32, Mining<'static>)>,
     ) -> ProxyResult<'static, ()> {
         info!("Listening for downstream message inside sv1 server");
-        while let Ok((downstream_id, message)) = downstream_to_sv1_server_receiver.recv().await {
+        while let Ok(downstream_message) = downstream_to_sv1_server_receiver.recv().await {
             // share validation will be done
-            error!("Message:{:?}", message);
-            error!("Downstream id: {:?}", downstream_id);
+            match downstream_message {
+                DownstreamMessages::SubmitShares(message) => {
+                    error!("Message from downstream to sv1 server:{:?}", message);
+                    error!(
+                        "Downstream id of the downstream which sent message to sv1 server: {:?}",
+                        message.downstream_id
+                    );
+
+                    let submit_share_extended = SubmitSharesExtended {
+                        channel_id: message.channel_id,
+                        // will change soon
+                        sequence_number: 0,
+                        job_id: message.share.job_id.parse::<u32>()?,
+                        nonce: message.share.nonce.0,
+                        ntime: message.share.time.0,
+                        // will change soon
+                        version: 0,
+                        extranonce: message.extranonce.try_into()?,
+                    };
+                    // send message to channel manager for validation
+                    sv1_server_to_channel_manager_sender.send((
+                        message.downstream_id,
+                        Mining::SubmitSharesExtended(submit_share_extended),
+                    ));
+                }
+            }
+            // let share =
         }
         Ok(())
     }
@@ -194,6 +220,17 @@ impl Sv1Server {
                 }
                 Mining::SetCustomMiningJobError(m) => {
                     info!("I got set custom mining job: {:?}", m);
+                }
+                Mining::SubmitSharesSuccess(m) => {
+                    info!("Received submit share success: {:?}", m);
+                    if let Some(downstream) = Self::get_downstream(m.channel_id, downstream.clone())
+                    {
+                        let downstream_id = Self::get_downstream_id(downstream.clone());
+                        // Send response from upstream to miner
+                        // let submit_share = server_to_client::GeneralResponse::into_submit(self);
+                        // sv1_server_to_downstream_sender.send((downstream_id,
+                        // submit_share.into()));
+                    }
                 }
                 Mining::SetTarget(m) => {
                     error!("Message: {:?}", m);
@@ -263,6 +300,7 @@ impl Sv1Server {
         if let Ok(Mining::OpenExtendedMiningChannelSuccess(msg)) = open_upstream_channel_success {
             downstream.extranonce1 = msg.extranonce_prefix.to_vec();
             downstream.extranonce2_len = msg.extranonce_size.into();
+            downstream.channel_id = Some(msg.channel_id);
             let subscribe = downstream.handle_message(subscribe).unwrap().unwrap();
             connection.send(v1::Message::OkResponse(subscribe)).await;
             let authorize = connection.receiver().recv().await?;
