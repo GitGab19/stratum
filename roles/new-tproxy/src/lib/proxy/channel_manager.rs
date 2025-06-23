@@ -127,6 +127,7 @@ impl ChannelManager {
                                                     }
                                                 }
                                             } else {
+                                                // ignoring of future NEMJ should be done here!!!!
                                                 channel_manager_to_sv1_server_sender.send(m);
                                             }
                                         }
