@@ -25,11 +25,12 @@ pub enum DownstreamMessages {
     SubmitShares(SubmitShareWithChannelId),
 }
 
-/// wrapper around a `mining.submit` with extra channel informationfor the Bridge to
+/// wrapper around a `mining.submit` with extra channel information for the Bridge to
 /// process
 #[derive(Debug)]
 pub struct SubmitShareWithChannelId {
     pub channel_id: u32,
+    pub downstream_id: u32,
     pub share: Submit<'static>,
     pub extranonce: Vec<u8>,
     pub extranonce2_len: usize,

@@ -16,12 +16,17 @@ use v1::{
     IsServer,
 };
 
+use crate::downstream_sv1::SubmitShareWithChannelId;
+
+use super::DownstreamMessages;
+
 #[derive(Debug, Clone)]
 pub struct Downstream {
+    pub channel_id: Option<u32>,
     pub downstream_id: u32,
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
-    downstream_to_sv1_server_sender: Sender<(u32, json_rpc::Message)>,
+    downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
     sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
     pub extranonce1: Vec<u8>,
     pub extranonce2_len: usize,
@@ -37,11 +42,12 @@ impl Downstream {
         downstream_id: u32,
         downstream_sv1_sender: Sender<json_rpc::Message>,
         downstream_sv1_receiver: Receiver<json_rpc::Message>,
-        downstream_to_sv1_server_sender: Sender<(u32, json_rpc::Message)>,
+        downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
         sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
         prevhash: Option<SetNewPrevHash<'static>>,
     ) -> Self {
         Self {
+            channel_id: None,
             downstream_id,
             downstream_sv1_sender,
             downstream_sv1_receiver,
@@ -63,7 +69,20 @@ impl Downstream {
             info!("Downstream receiver task started.");
             while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
                 debug!("Received message from downstream: {:?}", message);
-                let response = downstream.handle_message(message);
+                let response = downstream.handle_message(message.clone());
+                let mut sv1_server_to_downstream_receiver =
+                    downstream.sv1_server_to_downstream_receiver.subscribe();
+                // This part will only be used for share validation stuff.
+                while let Ok((downstream_id, message)) =
+                    sv1_server_to_downstream_receiver.recv().await
+                {
+                    if downstream_id == downstream.downstream_id && message.is_response() {
+                        // here we should be sending verdict of submit share fromm sv1-server and
+                        // sending to respective miner.
+                        error!("Message: {:?}", message);
+                        break;
+                    }
+                }
                 if let Ok(Some(msg)) = response {
                     downstream.downstream_sv1_sender.send(msg.into());
                 }
@@ -80,8 +99,6 @@ impl Downstream {
                 downstream.sv1_server_to_downstream_receiver.subscribe();
             while let Ok((downstream_id, message)) = sv1_server_to_downstream_receiver.recv().await
             {
-                error!("{downstream_id}");
-                error!("{message}");
                 if downstream_id == downstream.downstream_id {
                     debug!("Sending message to downstream: {:?}", message);
                     if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
@@ -164,11 +181,20 @@ impl IsServer<'static> for Downstream {
     }
 
     fn handle_submit(&self, request: &client_to_server::Submit<'static>) -> bool {
-        info!("Down: Submitting Share {:?}", request);
-        debug!("Down: Handling mining.submit: {:?}", &request);
+        if let Some(channel_id) = self.channel_id {
+            let to_send: SubmitShareWithChannelId = SubmitShareWithChannelId {
+                channel_id,
+                downstream_id: self.downstream_id,
+                share: request.clone(),
+                extranonce: self.extranonce1.clone(),
+                extranonce2_len: self.extranonce2_len,
+                version_rolling_mask: self.version_rolling_mask.clone(),
+            };
 
-        self.downstream_to_sv1_server_sender
-            .try_send((self.downstream_id, request.clone().into()));
+            self.downstream_to_sv1_server_sender
+                .try_send(DownstreamMessages::SubmitShares(to_send))
+                .unwrap();
+        }
 
         true
     }
