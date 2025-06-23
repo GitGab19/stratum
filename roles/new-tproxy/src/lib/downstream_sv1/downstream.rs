@@ -54,7 +54,7 @@ impl Downstream {
             downstream_to_sv1_server_sender,
             sv1_server_to_downstream_receiver,
             extranonce1: vec![0; 8],
-            extranonce2_len: 0,
+            extranonce2_len: 4,
             version_rolling_mask: None,
             version_rolling_min_bit: None,
             authorized_names: Vec::new(),
@@ -108,26 +108,6 @@ impl Downstream {
             }
             warn!("Downstream sender task ended.");
         });
-    }
-
-    pub fn handle_incoming_sv1_messages(&mut self) {
-        todo!()
-    }
-
-    pub async fn send_message_downstream(
-        self_: Arc<Mutex<Self>>,
-        response: json_rpc::Message,
-    ) -> Result<(), async_channel::SendError<v1::Message>> {
-        let sender = match self_.safe_lock(|s| s.downstream_sv1_sender.clone()) {
-            Ok(sender) => sender,
-            Err(e) => {
-                error!("Failed to acquire downstream lock: {:?}", e);
-                return Err(async_channel::SendError(response));
-            }
-        };
-
-        debug!("Sending message to downstream via API: {:?}", response);
-        sender.send(response).await
     }
 }
 
