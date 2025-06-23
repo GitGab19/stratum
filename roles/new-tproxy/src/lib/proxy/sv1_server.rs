@@ -54,6 +54,7 @@ impl Sv1Server {
     ) -> Self {
         let (sv1_server_to_downstream_sender, sv1_server_to_downstream_receiver) =
             broadcast::channel(10);
+        // mpsc - sender is only clonable and receiver are not..
         let (downstream_to_sv1_server_sender, downstream_to_sv1_server_receiver) = unbounded();
         Self {
             sv1_server_to_downstream_sender,
@@ -157,7 +158,6 @@ impl Sv1Server {
                     ));
                 }
             }
-            // let share =
         }
         Ok(())
     }
@@ -172,6 +172,9 @@ impl Sv1Server {
         while let Ok(message) = channel_manager_to_sv1_server_receiver.recv().await {
             match message {
                 Mining::NewExtendedMiningJob(m) => {
+                    if m.is_future() {
+                        continue;
+                    }
                     if let Some(downstream) = Self::get_downstream(m.channel_id, downstream.clone())
                     {
                         let prevhash = Self::get_prevhash(downstream.clone());
@@ -286,10 +289,15 @@ impl Sv1Server {
         downstream: &mut Downstream,
     ) -> ProxyResult<'static, Option<u32>> {
         let subscribe = connection.receiver().recv().await?;
-
         let mut channel_manager_to_sv1_server_receiver =
             self.channel_manager_to_sv1_server_receiver.subscribe();
+        let subscribe = downstream.handle_message(subscribe).unwrap().unwrap();
+        connection.send(v1::Message::OkResponse(subscribe)).await;
+        let authorize = connection.receiver().recv().await?;
+        let authorize = downstream.handle_message(authorize).unwrap().unwrap();
+        connection.send(v1::Message::OkResponse(authorize)).await;
 
+        /// Use authorize to get worker name
         let open_upstream_channel = self
             .channel_opener_sender
             .send((downstream.downstream_id, "translator_worker".into()))
@@ -301,11 +309,12 @@ impl Sv1Server {
             downstream.extranonce1 = msg.extranonce_prefix.to_vec();
             downstream.extranonce2_len = msg.extranonce_size.into();
             downstream.channel_id = Some(msg.channel_id);
-            let subscribe = downstream.handle_message(subscribe).unwrap().unwrap();
-            connection.send(v1::Message::OkResponse(subscribe)).await;
-            let authorize = connection.receiver().recv().await?;
-            let authorize = downstream.handle_message(authorize).unwrap().unwrap();
-            connection.send(v1::Message::OkResponse(authorize)).await;
+
+            let extranonce_msg = server_to_client::SetExtranonce {
+                extra_nonce1: msg.extranonce_prefix.into(),
+                extra_nonce2_size: msg.extranonce_size.into(),
+            };
+            connection.send(extranonce_msg.into()).await;
 
             return Ok(Some(msg.channel_id));
         }

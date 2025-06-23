@@ -61,7 +61,7 @@ impl Upstream {
         };
 
         let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
-        info!("I am the initiator");
+
         let (upstream_receiver, upstream_sender) =
             Connection::new(socket, HandshakeRole::Initiator(initiator))
                 .await
