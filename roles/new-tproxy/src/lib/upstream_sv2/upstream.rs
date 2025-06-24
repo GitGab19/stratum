@@ -29,9 +29,9 @@ pub struct Upstream {
     /// Sender for the SV2 Upstream role
     pub upstream_sender: Sender<EitherFrame>,
     /// Sender for the ChannelManager thread
-    pub upstream_to_channel_manager_sender: Sender<EitherFrame>,
+    pub channel_manager_sender: Sender<EitherFrame>,
     /// Receiver for the ChannelManager thread
-    pub channel_manager_to_upstream_receiver: Receiver<EitherFrame>,
+    pub channel_manager_receiver: Receiver<EitherFrame>,
 }
 
 impl Upstream {
@@ -39,8 +39,8 @@ impl Upstream {
     pub async fn new(
         upstream_address: SocketAddr,
         upstream_authority_public_key: Secp256k1PublicKey,
-        upstream_to_channel_manager_sender: Sender<EitherFrame>,
-        channel_manager_to_upstream_receiver: Receiver<EitherFrame>,
+        channel_manager_sender: Sender<EitherFrame>,
+        channel_manager_receiver: Receiver<EitherFrame>,
     ) -> ProxyResult<'static, Self> {
         info!("Attempting to connect to upstream at {}", upstream_address);
 
@@ -76,8 +76,8 @@ impl Upstream {
         Ok(Self {
             upstream_receiver,
             upstream_sender,
-            upstream_to_channel_manager_sender,
-            channel_manager_to_upstream_receiver,
+            channel_manager_sender,
+            channel_manager_receiver,
         })
     }
 
@@ -137,7 +137,7 @@ impl Upstream {
     }
 
     pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), Error> {
-        self.upstream_to_channel_manager_sender
+        self.channel_manager_sender
             .send(message)
             .await
             .map_err(|_| Error::ChannelErrorSender);
@@ -169,7 +169,7 @@ impl Upstream {
         let upstream = self.clone();
 
         tokio::spawn(async move {
-            while let Ok(message) = upstream.channel_manager_to_upstream_receiver.recv().await {
+            while let Ok(message) = upstream.channel_manager_receiver.recv().await {
                 debug!("Received message from channel manager to send upstream.");
                 if let Err(e) = upstream.send_upstream(message.try_into().unwrap()).await {
                     error!("Failed to send message upstream: {:?}", e);

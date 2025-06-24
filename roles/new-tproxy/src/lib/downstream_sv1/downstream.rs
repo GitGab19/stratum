@@ -26,8 +26,8 @@ pub struct Downstream {
     pub downstream_id: u32,
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
-    downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
-    sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
+    sv1_server_sender: Sender<DownstreamMessages>,
+    sv1_server_receiver: broadcast::Sender<json_rpc::Message>,
     pub extranonce1: Vec<u8>,
     pub extranonce2_len: usize,
     version_rolling_mask: Option<HexU32Be>,
@@ -42,8 +42,8 @@ impl Downstream {
         downstream_id: u32,
         downstream_sv1_sender: Sender<json_rpc::Message>,
         downstream_sv1_receiver: Receiver<json_rpc::Message>,
-        downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
-        sv1_server_to_downstream_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
+        sv1_server_sender: Sender<DownstreamMessages>,
+        sv1_server_receiver: broadcast::Sender<json_rpc::Message>,
         prevhash: Option<SetNewPrevHash<'static>>,
     ) -> Self {
         Self {
@@ -51,8 +51,8 @@ impl Downstream {
             downstream_id,
             downstream_sv1_sender,
             downstream_sv1_receiver,
-            downstream_to_sv1_server_sender,
-            sv1_server_to_downstream_receiver,
+            sv1_server_sender,
+            sv1_server_receiver,
             extranonce1: vec![0; 8],
             extranonce2_len: 4,
             version_rolling_mask: None,
@@ -70,13 +70,11 @@ impl Downstream {
             while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
                 debug!("Received message from downstream: {:?}", message);
                 let response = downstream.handle_message(message.clone());
-                let mut sv1_server_to_downstream_receiver =
-                    downstream.sv1_server_to_downstream_receiver.subscribe();
+                let mut sv1_server_receiver = downstream.sv1_server_receiver.subscribe();
                 // This part will only be used for share validation stuff.
-                while let Ok((downstream_id, message)) =
-                    sv1_server_to_downstream_receiver.recv().await
+                while let Ok(message) = sv1_server_receiver.recv().await
                 {
-                    if downstream_id == downstream.downstream_id && message.is_response() {
+                    if message.is_response() {
                         // here we should be sending verdict of submit share fromm sv1-server and
                         // sending to respective miner.
                         error!("Message: {:?}", message);
@@ -95,15 +93,12 @@ impl Downstream {
         let downstream = self.clone();
         tokio::spawn(async move {
             info!("Downstream sender task started.");
-            let mut sv1_server_to_downstream_receiver =
-                downstream.sv1_server_to_downstream_receiver.subscribe();
-            while let Ok((downstream_id, message)) = sv1_server_to_downstream_receiver.recv().await
+            let mut sv1_server_receiver = downstream.sv1_server_receiver.subscribe();
+            while let Ok(message) = sv1_server_receiver.recv().await
             {
-                if downstream_id == downstream.downstream_id {
-                    debug!("Sending message to downstream: {:?}", message);
-                    if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
-                        error!("Failed to send message to downstream: {:?}", e);
-                    }
+                debug!("Sending message to downstream: {:?}", message);
+                if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
+                    error!("Failed to send message to downstream: {:?}", e);
                 }
             }
             warn!("Downstream sender task ended.");
@@ -171,7 +166,7 @@ impl IsServer<'static> for Downstream {
                 version_rolling_mask: self.version_rolling_mask.clone(),
             };
 
-            self.downstream_to_sv1_server_sender
+            self.sv1_server_sender
                 .try_send(DownstreamMessages::SubmitShares(to_send))
                 .unwrap();
         }
