@@ -40,10 +40,15 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: OpenExtendedMiningChannelSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        let nominal_hashrate = 100000.0; //TODO
+        // Get the stored user identity and hashrate using request_id as downstream_id
+        let (user_identity, nominal_hashrate) = self
+            .pending_channels
+            .remove(&m.request_id)
+            .unwrap_or_else(|| ("unknown".to_string(), 100000.0));
+        
         info!(
-            "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}",
-            m.request_id, m.channel_id
+            "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}, user: {}, hashrate: {}",
+            m.request_id, m.channel_id, user_identity, nominal_hashrate
         );
         debug!("OpenStandardMiningChannelSuccess: {:?}", m);
         info!("Up: Successfully Opened Extended Mining Channel");
@@ -52,7 +57,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         let version_rolling = true; // we assume this is always true on extended channels
         let extended_channel = ExtendedChannel::new(
             m.channel_id,
-            "user_identity".to_string(),
+            user_identity,
             extranonce_prefix,
             target.into(),
             nominal_hashrate,
