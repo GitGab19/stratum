@@ -22,7 +22,7 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    proxy::{sv1_server::Sv1Server, ChannelManager},
+    proxy::{sv1_server::Sv1Server, ChannelManager, channel_manager::ChannelMappingMode},
     upstream_sv2::Upstream,
 };
 
@@ -62,12 +62,11 @@ impl TranslatorSv2 {
         let (upstream_to_channel_manager_sender, upstream_to_channel_manager_receiver) =
             unbounded();
 
-        let (channel_manager_to_sv1_server_sender, _) = broadcast::channel(10);
+        let (channel_manager_to_sv1_server_sender, channel_manager_to_sv1_server_receiver) =
+            unbounded();
 
         let (sv1_server_to_channel_manager_sender, sv1_server_to_channel_manager_receiver) =
             unbounded();
-
-        let (channel_opener_sender, channel_opener_receiver) = unbounded();
 
         let upstream_addr = SocketAddr::new(
             self.config.upstream_address.parse().unwrap(),
@@ -98,8 +97,8 @@ impl TranslatorSv2 {
             channel_manager_to_upstream_sender,
             upstream_to_channel_manager_receiver,
             channel_manager_to_sv1_server_sender.clone(),
-            sv1_server_to_channel_manager_receiver,
-            channel_opener_receiver,
+            sv1_server_to_channel_manager_receiver, 
+            ChannelMappingMode::PerClient,
         )));
 
         let downstream_addr: SocketAddr = SocketAddr::new(
@@ -111,13 +110,12 @@ impl TranslatorSv2 {
 
         let mut sv1_server = Sv1Server::new(
             downstream_addr,
-            channel_opener_sender,
-            channel_manager_to_sv1_server_sender,
+            channel_manager_to_sv1_server_receiver,
             sv1_server_to_channel_manager_sender,
         );
 
         ChannelManager::on_upstream_message(channel_manager.clone()).await;
-        ChannelManager::handle_downstream_message(channel_manager).await;
+        ChannelManager::on_downstream_message(channel_manager).await;
 
         info!("Starting upstream listener task.");
 
