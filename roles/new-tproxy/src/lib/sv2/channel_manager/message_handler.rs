@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{downstream_sv1::downstream::Downstream, proxy::ChannelManager};
+use crate::{sv1::downstream::Downstream, sv2::ChannelManager};
 use roles_logic_sv2::{
     channels::client::extended::ExtendedChannel,
     common_messages_sv2::{Protocol, SetupConnectionSuccess},

@@ -1,11 +1,9 @@
 use crate::{
-    downstream_sv1::{
-        downstream,
-        sv2_to_sv1_utils::{create_notify, get_set_difficulty},
-        Downstream, DownstreamMessages,
+    sv1::{
+        downstream::Downstream,
+        DownstreamMessages,
     },
     error::ProxyResult,
-    proxy::ChannelManager,
 };
 use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -28,6 +26,7 @@ use v1::{
     utils::{Extranonce, HexU32Be},
     IsServer,
 };
+use crate::sv1::translation_utils::create_notify;
 
 pub struct Sv1Server {
     downstream_id_factory: IdFactory,
