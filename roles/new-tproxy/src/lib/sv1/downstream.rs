@@ -1,9 +1,7 @@
 use std::sync::Arc;
-
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
-    mining_sv2::SetNewPrevHash,
     utils::Mutex,
 };
 use tokio::sync::{broadcast, mpsc};
@@ -15,9 +13,7 @@ use v1::{
     utils::{Extranonce, HexU32Be, PrevHash},
     IsServer,
 };
-
 use crate::sv1::SubmitShareWithChannelId;
-
 use super::DownstreamMessages;
 
 #[derive(Debug, Clone)]
@@ -27,14 +23,12 @@ pub struct Downstream {
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
     sv1_server_sender: Sender<DownstreamMessages>,
-    sv1_server_receiver: broadcast::Sender<json_rpc::Message>,
+    sv1_server_receiver: broadcast::Sender<(u32, json_rpc::Message)>, // channel_id, message
     pub extranonce1: Vec<u8>,
     pub extranonce2_len: usize,
     version_rolling_mask: Option<HexU32Be>,
     version_rolling_min_bit: Option<HexU32Be>,
     authorized_names: Vec<String>,
-    pub prevhash: Option<SetNewPrevHash<'static>>,
-    pub clean_job: bool,
 }
 
 impl Downstream {
@@ -43,8 +37,7 @@ impl Downstream {
         downstream_sv1_sender: Sender<json_rpc::Message>,
         downstream_sv1_receiver: Receiver<json_rpc::Message>,
         sv1_server_sender: Sender<DownstreamMessages>,
-        sv1_server_receiver: broadcast::Sender<json_rpc::Message>,
-        prevhash: Option<SetNewPrevHash<'static>>,
+        sv1_server_receiver: broadcast::Sender<(u32, json_rpc::Message)>,
     ) -> Self {
         Self {
             channel_id: None,
@@ -58,47 +51,34 @@ impl Downstream {
             version_rolling_mask: None,
             version_rolling_min_bit: None,
             authorized_names: Vec::new(),
-            prevhash,
-            clean_job: true,
         }
     }
 
-    pub fn spawn_downstream_receiver(&self) {
-        let mut downstream = self.clone();
+    pub fn spawn_downstream_receiver(self_: Arc<Mutex<Self>>) {
+        let mut downstream = self_.clone();
         tokio::spawn(async move {
-            info!("Downstream receiver task started.");
-            while let Ok(message) = downstream.downstream_sv1_receiver.recv().await {
+            while let Ok(message) = downstream.super_safe_lock(|d| d.downstream_sv1_receiver.clone()).recv().await {
                 debug!("Received message from downstream: {:?}", message);
-                let response = downstream.handle_message(message.clone());
-                let mut sv1_server_receiver = downstream.sv1_server_receiver.subscribe();
-                // This part will only be used for share validation stuff.
-                while let Ok(message) = sv1_server_receiver.recv().await
-                {
-                    if message.is_response() {
-                        // here we should be sending verdict of submit share fromm sv1-server and
-                        // sending to respective miner.
-                        error!("Message: {:?}", message);
-                        break;
-                    }
-                }
-                if let Ok(Some(msg)) = response {
-                    downstream.downstream_sv1_sender.send(msg.into());
-                }
+                let response = downstream.super_safe_lock(|d| d.handle_message(message.clone()));
+                // TODO: handle submit share response (we need to send this to sv1-server)
             }
             warn!("Downstream receiver task ended.");
         });
     }
 
-    pub fn spawn_downstream_sender(&self) {
-        let downstream = self.clone();
+    pub fn spawn_downstream_sender(self_: Arc<Mutex<Self>>) {
+        let downstream = self_.clone();
         tokio::spawn(async move {
             info!("Downstream sender task started.");
-            let mut sv1_server_receiver = downstream.sv1_server_receiver.subscribe();
-            while let Ok(message) = sv1_server_receiver.recv().await
+            let mut sv1_server_receiver = downstream.super_safe_lock(|d| d.sv1_server_receiver.clone()).subscribe();
+            while let Ok((channel_id, message)) = sv1_server_receiver.recv().await
             {
-                debug!("Sending message to downstream: {:?}", message);
-                if let Err(e) = downstream.downstream_sv1_sender.send(message).await {
-                    error!("Failed to send message to downstream: {:?}", e);
+                if let Some(downstream_channel_id) = downstream.super_safe_lock(|d| d.channel_id) {
+                    if downstream_channel_id == channel_id {
+                        if let Err(e) = downstream.super_safe_lock(|d| d.downstream_sv1_sender.clone()).send(message).await {
+                            error!("Failed to send message to downstream: {:?}", e);
+                        }
+                    }
                 }
             }
             warn!("Downstream sender task ended.");
