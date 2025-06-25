@@ -1,7 +1,7 @@
 use crate::{
-    downstream_sv1::downstream::Downstream,
+    sv1::downstream::Downstream,
     error::Error,
-    upstream_sv2::upstream::{EitherFrame, Message, StdFrame},
+    sv2::upstream::upstream::{EitherFrame, Message, StdFrame},
     utils::{into_static, message_from_frame},
 };
 use async_channel::{Receiver, Sender};
