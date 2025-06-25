@@ -1,17 +1,15 @@
 use crate::{
-    sv1::{
-        downstream::Downstream,
-        DownstreamMessages,
-    },
-    error::ProxyResult,
+    error::ProxyResult, sv1::{
+        downstream::Downstream, translation_utils::get_set_difficulty, DownstreamMessages
+    }
 };
 use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
 use roles_logic_sv2::{
     bitcoin::secp256k1::Message,
-    mining_sv2::{SetNewPrevHash, SubmitSharesExtended},
+    mining_sv2::{SetNewPrevHash, SubmitSharesExtended, Target},
     parsers::Mining,
-    utils::{Id as IdFactory, Mutex},
+    utils::{hash_rate_to_target, Id as IdFactory, Mutex},
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
@@ -27,6 +25,7 @@ use v1::{
     IsServer,
 };
 use crate::sv1::translation_utils::create_notify;
+use crate::config::TranslatorConfig;
 
 pub struct Sv1Server {
     downstream_id_factory: IdFactory,
@@ -40,6 +39,7 @@ pub struct Sv1Server {
     channel_manager_receiver: Receiver<Mining<'static>>,
     channel_manager_sender: Sender<Mining<'static>>,
     clean_job: Arc<Mutex<bool>>,
+    config: TranslatorConfig,
 }
 
 impl Sv1Server {
@@ -49,6 +49,7 @@ impl Sv1Server {
         listener_addr: SocketAddr,
         channel_manager_receiver: Receiver<Mining<'static>>,
         channel_manager_sender: Sender<Mining<'static>>,
+        config: TranslatorConfig,
     ) -> Self {
         let (sv1_server_to_downstream_sender, sv1_server_to_downstream_receiver) =
             broadcast::channel(10);
@@ -66,6 +67,7 @@ impl Sv1Server {
             channel_manager_receiver,
             channel_manager_sender,
             clean_job: Arc::new(Mutex::new(true)),
+            config,
         }
     }
 
@@ -253,16 +255,21 @@ impl Sv1Server {
             }
             _ => "unknown".to_string(),
         };
-        let hashrate = 1000.0;
+        let hashrate = self.config.downstream_difficulty_config.min_individual_miner_hashrate as f64;
+        let share_per_min: f64 = self.config.downstream_difficulty_config.shares_per_minute as f64;
         
         let authorize = downstream.super_safe_lock(|d| d.handle_message(authorize_msg)).unwrap().unwrap();
         connection.send(v1::Message::OkResponse(authorize)).await;
+
+        let initial_target: Target = hash_rate_to_target(hashrate, share_per_min).unwrap().into();
+        let set_difficulty = get_set_difficulty(initial_target).unwrap();
+        connection.send(set_difficulty).await;
 
         // Create OpenExtendedMiningChannel message with the extracted user identity
         let open_channel_msg = roles_logic_sv2::mining_sv2::OpenExtendedMiningChannel {
             request_id: downstream.super_safe_lock(|d| d.downstream_id),
             user_identity: user_identity.clone().try_into()?,
-            nominal_hash_rate: hashrate, // Default hash rate
+            nominal_hash_rate: hashrate as f32, // Default hash rate
             max_target: [0xFF; 32].into(), // Maximum target
             min_extranonce_size: 4, // Default extranonce size
         };
