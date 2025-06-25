@@ -13,8 +13,10 @@
 
 use v1::{client_to_server::Submit, utils::HexU32Be};
 pub mod downstream;
-pub mod sv2_to_sv1_utils;
+pub mod sv1_server;
+pub mod translation_utils;
 pub use downstream::Downstream;
+pub use sv1_server::Sv1Server;
 
 /// The messages that are sent from the downstream handling logic
 /// to a central "Bridge" component for further processing.

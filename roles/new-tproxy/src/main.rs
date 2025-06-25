@@ -3,7 +3,7 @@ use args::Args;
 use config::TranslatorConfig;
 use error::{Error, ProxyResult};
 pub use new_translator_sv2::{
-    config, downstream_sv1, error, proxy, status, upstream_sv2, TranslatorSv2,
+    config, sv1, error, sv2, status, TranslatorSv2,
 };
 
 use ext_config::{Config, File, FileFormat};

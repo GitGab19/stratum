@@ -22,16 +22,16 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    proxy::{sv1_server::Sv1Server, ChannelManager, channel_manager::ChannelMappingMode},
-    upstream_sv2::Upstream,
+    sv1::sv1_server::Sv1Server,
+    sv2::{ChannelManager, ChannelMappingMode},
+    sv2::Upstream,
 };
 
 pub mod config;
-pub mod downstream_sv1;
+pub mod sv1;
 pub mod error;
-pub mod proxy;
+pub mod sv2;
 pub mod status;
-pub mod upstream_sv2;
 pub mod utils;
 
 /// The main struct that manages the SV1/SV2 translator.

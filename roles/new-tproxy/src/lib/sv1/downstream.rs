@@ -16,7 +16,7 @@ use v1::{
     IsServer,
 };
 
-use crate::downstream_sv1::SubmitShareWithChannelId;
+use crate::sv1::SubmitShareWithChannelId;
 
 use super::DownstreamMessages;
 
