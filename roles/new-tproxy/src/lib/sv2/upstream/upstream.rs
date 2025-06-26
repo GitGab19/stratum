@@ -42,8 +42,6 @@ impl Upstream {
         channel_manager_sender: Sender<EitherFrame>,
         channel_manager_receiver: Receiver<EitherFrame>,
     ) -> ProxyResult<'static, Self> {
-        info!("Attempting to connect to upstream at {}", upstream_address);
-
         let socket = loop {
             match TcpStream::connect(upstream_address).await {
                 Ok(socket) => {
@@ -71,8 +69,6 @@ impl Upstream {
                 })
                 .unwrap();
 
-        info!("Noise handshake with upstream completed.");
-
         Ok(Self {
             upstream_receiver,
             upstream_sender,
@@ -82,13 +78,9 @@ impl Upstream {
     }
 
     pub async fn start(&mut self) -> ProxyResult<'static, ()> {
-        info!("Starting upstream connection.");
-
         self.setup_connection().await?;
         self.spawn_upstream_receiver()?;
         self.spawn_upstream_sender()?;
-
-        info!("Upstream fully initialized.");
         Ok(())
     }
 
@@ -132,21 +124,56 @@ impl Upstream {
         let self_mutex = Arc::new(Mutex::new(self.clone()));
         ParseCommonMessagesFromUpstream::handle_message_common(self_mutex, message_type, payload)?;
 
-        info!("SV2 SetupConnection handshake completed successfully.");
         Ok(())
     }
 
     pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), Error> {
-        self.channel_manager_sender
-            .send(message)
-            .await
-            .map_err(|_| Error::ChannelErrorSender);
+        match message {
+            EitherFrame::Sv2(sv2_frame) => {
+                let mut std_frame: StdFrame = sv2_frame.try_into()?;
+
+                // Use message_from_frame to parse the message
+                let mut frame: codec_sv2::Frame<AnyMessage<'static>, buffer_sv2::Slice> =
+                    std_frame.clone().into();
+                let (message_type, mut payload, parsed_message) =
+                    message_from_frame(&mut frame).unwrap();
+
+                match parsed_message {
+                    AnyMessage::Common(_) => {
+                        // Common message - use handlers
+                        let self_mutex = Arc::new(Mutex::new(self.clone()));
+                        ParseCommonMessagesFromUpstream::handle_message_common(
+                            self_mutex,
+                            message_type,
+                            payload.as_mut_slice(),
+                        )?;
+                    }
+                    AnyMessage::Mining(_) => {
+                        // Mining message - send to channel manager
+                        let either_frame = EitherFrame::Sv2(std_frame.into());
+                        self.channel_manager_sender
+                            .send(either_frame)
+                            .await
+                            .map_err(|e| {
+                                error!("Failed to send message to channel manager: {:?}", e);
+                                Error::ChannelErrorSender
+                            });
+                    }
+                    _ => {
+                        // Other message types - return error
+                        return Err(Error::UnexpectedMessage);
+                    }
+                }
+            }
+            EitherFrame::HandShake(handshake_frame) => {
+                debug!("Received handshake frame: {:?}", handshake_frame);
+            }
+        }
         Ok(())
     }
 
     /// Spawns the upstream receiver task.
     fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
-        info!("Spawning upstream receiver task.");
         let upstream = self.clone();
 
         tokio::spawn(async move {
@@ -165,7 +192,6 @@ impl Upstream {
 
     /// Spawns the upstream sender task.
     fn spawn_upstream_sender(&self) -> ProxyResult<'static, ()> {
-        info!("Spawning upstream sender task.");
         let upstream = self.clone();
 
         tokio::spawn(async move {
