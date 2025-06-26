@@ -100,6 +100,11 @@ pub enum Error<'a> {
     TargetError(roles_logic_sv2::errors::Error),
     Sv1MessageTooLong,
     UnexpectedMessage,
+    // Utils-specific errors
+    /// Job not found during share validation
+    JobNotFound,
+    /// Invalid merkle root during share validation
+    InvalidMerkleRoot,
 }
 
 impl fmt::Display for Error<'_> {
@@ -140,6 +145,8 @@ impl fmt::Display for Error<'_> {
             UnexpectedMessage => {
                 write!(f, "Received a message type that was not expected")
             }
+            JobNotFound => write!(f, "Job not found during share validation"),
+            InvalidMerkleRoot => write!(f, "Invalid merkle root during share validation"),
         }
     }
 }

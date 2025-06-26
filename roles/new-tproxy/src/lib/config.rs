@@ -33,6 +33,10 @@ pub struct TranslatorConfig {
     pub min_supported_version: u16,
     /// The minimum size required for the extranonce2 field in mining submissions.
     pub min_extranonce2_size: u16,
+    /// The user identity/username to use when connecting to the pool.
+    /// This will be appended with a counter for each mining channel (e.g., username.miner1,
+    /// username.miner2).
+    pub user_identity: String,
     /// Configuration settings for managing difficulty on the downstream connection.
     pub downstream_difficulty_config: DownstreamDifficultyConfig,
     /// Configuration settings for managing difficulty on the upstream connection.
@@ -97,6 +101,7 @@ impl TranslatorConfig {
         max_supported_version: u16,
         min_supported_version: u16,
         min_extranonce2_size: u16,
+        user_identity: String,
     ) -> Self {
         Self {
             upstream_address: upstream.address,
@@ -107,6 +112,7 @@ impl TranslatorConfig {
             max_supported_version,
             min_supported_version,
             min_extranonce2_size,
+            user_identity,
             downstream_difficulty_config: downstream.difficulty_config,
             upstream_difficulty_config: upstream.difficulty_config,
         }

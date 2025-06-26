@@ -23,15 +23,14 @@ use config::TranslatorConfig;
 
 use crate::{
     sv1::sv1_server::Sv1Server,
-    sv2::{ChannelManager, ChannelMappingMode},
-    sv2::Upstream,
+    sv2::{ChannelManager, ChannelMappingMode, Upstream},
 };
 
 pub mod config;
-pub mod sv1;
 pub mod error;
-pub mod sv2;
 pub mod status;
+pub mod sv1;
+pub mod sv2;
 pub mod utils;
 
 /// The main struct that manages the SV1/SV2 translator.
@@ -54,8 +53,6 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
-        info!("Starting TranslatorSv2 service.");
-
         let (channel_manager_to_upstream_sender, channel_manager_to_upstream_receiver) =
             unbounded();
 
@@ -83,10 +80,7 @@ impl TranslatorSv2 {
         )
         .await
         {
-            Ok(upstream) => {
-                info!("Successfully initialized upstream connection.");
-                upstream
-            }
+            Ok(upstream) => upstream,
             Err(e) => {
                 error!("Failed to initialize upstream connection: {:?}", e);
                 return;
@@ -97,7 +91,7 @@ impl TranslatorSv2 {
             channel_manager_to_upstream_sender,
             upstream_to_channel_manager_receiver,
             channel_manager_to_sv1_server_sender.clone(),
-            sv1_server_to_channel_manager_receiver, 
+            sv1_server_to_channel_manager_receiver,
             ChannelMappingMode::PerClient,
         )));
 
@@ -105,8 +99,6 @@ impl TranslatorSv2 {
             self.config.downstream_address.parse().unwrap(),
             self.config.downstream_port,
         );
-
-        info!("Starting downstream SV1 server at: {}", downstream_addr);
 
         let mut sv1_server = Sv1Server::new(
             downstream_addr,
@@ -118,16 +110,10 @@ impl TranslatorSv2 {
         ChannelManager::on_upstream_message(channel_manager.clone()).await;
         ChannelManager::on_downstream_message(channel_manager).await;
 
-        info!("Starting upstream listener task.");
-
         if let Err(e) = upstream.start().await {
             error!("Failed to start upstream listener: {:?}", e);
             return;
         }
-
-        info!("Starting downstream SV1 server listener.");
         sv1_server.start().await;
-
-        info!("TranslatorSv2 service started successfully.");
     }
 }

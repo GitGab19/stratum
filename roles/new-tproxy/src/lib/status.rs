@@ -206,5 +206,9 @@ pub async fn handle_error(
             send_status(sender, e, error_handling::ErrorBranch::Break).await
         }
         Error::UnexpectedMessage => todo!(),
+        Error::JobNotFound => send_status(sender, e, error_handling::ErrorBranch::Break).await,
+        Error::InvalidMerkleRoot => {
+            send_status(sender, e, error_handling::ErrorBranch::Break).await
+        }
     }
 }

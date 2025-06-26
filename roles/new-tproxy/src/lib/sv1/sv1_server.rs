@@ -1,7 +1,11 @@
 use crate::{
-    error::ProxyResult, sv1::{
-        downstream::Downstream, translation_utils::get_set_difficulty, DownstreamMessages
-    }
+    config::TranslatorConfig,
+    error::ProxyResult,
+    sv1::{
+        downstream::Downstream,
+        translation_utils::{create_notify, get_set_difficulty},
+        DownstreamMessages,
+    },
 };
 use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -10,13 +14,21 @@ use roles_logic_sv2::{
     mining_sv2::{SetNewPrevHash, SubmitSharesExtended, Target},
     parsers::Mining,
     utils::{hash_rate_to_target, Id as IdFactory, Mutex},
+    vardiff::classic::VardiffState,
+    Vardiff,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tokio::{
     net::TcpListener,
     sync::{broadcast, mpsc},
+    time,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use v1::{
     client_to_server,
     error::Error,
@@ -24,22 +36,24 @@ use v1::{
     utils::{Extranonce, HexU32Be},
     IsServer,
 };
-use crate::sv1::translation_utils::create_notify;
-use crate::config::TranslatorConfig;
 
 pub struct Sv1Server {
     downstream_id_factory: IdFactory,
-    sv1_server_to_downstream_sender: broadcast::Sender<(u32, json_rpc::Message)>,
-    sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, json_rpc::Message)>, // channel_id, message
+    sv1_server_to_downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
+    sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
     downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
     downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
     downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+    vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
     prevhash: Arc<Mutex<Option<SetNewPrevHash<'static>>>>,
     listener_addr: SocketAddr,
     channel_manager_receiver: Receiver<Mining<'static>>,
     channel_manager_sender: Sender<Mining<'static>>,
     clean_job: Arc<Mutex<bool>>,
     config: TranslatorConfig,
+    sequence_counter: Arc<Mutex<u32>>,
+    miner_counter: Arc<Mutex<u32>>,
+    shares_per_minute: f32,
 }
 
 impl Sv1Server {
@@ -55,6 +69,7 @@ impl Sv1Server {
             broadcast::channel(10);
         // mpsc - sender is only clonable and receiver are not..
         let (downstream_to_sv1_server_sender, downstream_to_sv1_server_receiver) = unbounded();
+        let shares_per_minute = config.downstream_difficulty_config.shares_per_minute as f32;
         Self {
             sv1_server_to_downstream_sender,
             sv1_server_to_downstream_receiver,
@@ -62,20 +77,38 @@ impl Sv1Server {
             downstream_to_sv1_server_receiver,
             downstream_id_factory: IdFactory::new(),
             downstreams: Arc::new(Mutex::new(HashMap::new())),
+            vardiff: Arc::new(Mutex::new(HashMap::new())),
             prevhash: Arc::new(Mutex::new(None)),
             listener_addr,
             channel_manager_receiver,
             channel_manager_sender,
             clean_job: Arc::new(Mutex::new(true)),
             config,
+            sequence_counter: Arc::new(Mutex::new(0)),
+            miner_counter: Arc::new(Mutex::new(0)),
+            shares_per_minute,
         }
     }
 
     pub async fn start(&mut self) -> ProxyResult<'static, ()> {
         info!("Starting SV1 server on {}", self.listener_addr);
+        // get the first target for the first set difficulty message
+        let first_target: Target = hash_rate_to_target(
+            self.config
+                .downstream_difficulty_config
+                .min_individual_miner_hashrate as f64,
+            self.config.downstream_difficulty_config.shares_per_minute as f64,
+        )
+        .unwrap()
+        .into();
+
+        let vardiff = self.vardiff.clone();
         tokio::spawn(Self::handle_downstream_message(
             self.downstream_to_sv1_server_receiver.clone(),
             self.channel_manager_sender.clone(),
+            self.sequence_counter.clone(),
+            self.downstreams.clone(),
+            vardiff.clone(),
         ));
         tokio::spawn(Self::handle_upstream_message(
             self.channel_manager_receiver.clone(),
@@ -83,6 +116,15 @@ impl Sv1Server {
             self.downstreams.clone(),
             self.prevhash.clone(),
             self.clean_job.clone(),
+            first_target.clone(),
+        ));
+
+        // Spawn vardiff loop
+        tokio::spawn(Self::spawn_vardiff_loop(
+            self.downstreams.clone(),
+            vardiff.clone(),
+            self.sv1_server_to_downstream_sender.clone(),
+            self.shares_per_minute,
         ));
 
         let listener = TcpListener::bind(self.listener_addr).await.map_err(|e| {
@@ -90,6 +132,7 @@ impl Sv1Server {
             e
         })?;
 
+        let vardiff = self.vardiff.clone();
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
@@ -103,18 +146,28 @@ impl Sv1Server {
                         connection.receiver().clone(),
                         self.downstream_to_sv1_server_sender.clone(),
                         self.sv1_server_to_downstream_sender.clone(),
+                        first_target.clone(),
+                        self.shares_per_minute,
+                        self.config
+                            .downstream_difficulty_config
+                            .min_individual_miner_hashrate as f32,
                     )));
-                    self.downstreams.safe_lock(|d| {
-                        d.insert(downstream_id, downstream.clone())
+                    self.downstreams
+                        .safe_lock(|d| d.insert(downstream_id, downstream.clone()));
+                    // Insert vardiff state for this downstream
+                    vardiff.safe_lock(|v| {
+                        v.insert(
+                            downstream_id,
+                            Arc::new(RwLock::new(
+                                VardiffState::new().expect("Failed to create VardiffState"),
+                            )),
+                        );
                     });
                     info!("Downstream {} registered successfully", downstream_id);
 
                     let channel_id = self
                         .open_extended_mining_channel(connection, downstream.clone())
                         .await?;
-
-                    Downstream::spawn_downstream_receiver(downstream.clone());
-                    Downstream::spawn_downstream_sender(downstream.clone());
                 }
                 Err(e) => {
                     warn!("Failed to accept new connection: {:?}", e);
@@ -126,30 +179,57 @@ impl Sv1Server {
     pub async fn handle_downstream_message(
         mut downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
         sv1_server_to_channel_manager_sender: Sender<Mining<'static>>,
+        sequence_counter: Arc<Mutex<u32>>,
+        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
     ) -> ProxyResult<'static, ()> {
-        info!("Listening for downstream message inside sv1 server");
         while let Ok(downstream_message) = downstream_to_sv1_server_receiver.recv().await {
             match downstream_message {
                 DownstreamMessages::SubmitShares(message) => {
-                    error!("Message from downstream to sv1 server:{:?}", message);
-                    error!(
-                        "Downstream id of the downstream which sent message to sv1 server: {:?}",
-                        message.downstream_id
-                    );
+                    // Increment vardiff counter for this downstream
+                    vardiff.safe_lock(|v| {
+                        if let Some(vardiff_state) = v.get(&message.downstream_id) {
+                            vardiff_state
+                                .write()
+                                .unwrap()
+                                .increment_shares_since_last_update();
+                        }
+                    });
+
+                    // For version masking see https://github.com/slushpool/stratumprotocol/blob/master/stratum-extensions.mediawiki#changes-in-request-miningsubmit
+                    let last_job_version =
+                        message
+                            .last_job_version
+                            .ok_or(crate::error::Error::RolesSv2Logic(
+                                roles_logic_sv2::errors::Error::NoValidJob,
+                            ))?;
+                    let version = match (message.share.version_bits, message.version_rolling_mask) {
+                        (Some(version_bits), Some(rolling_mask)) => {
+                            (last_job_version & !rolling_mask.0) | (version_bits.0 & rolling_mask.0)
+                        }
+                        (None, None) => last_job_version,
+                        _ => {
+                            return Err(crate::error::Error::V1Protocol(
+                                v1::error::Error::InvalidSubmission,
+                            ))
+                        }
+                    };
+                    let extranonce: Vec<u8> = message.share.extra_nonce2.into();
 
                     let submit_share_extended = SubmitSharesExtended {
                         channel_id: message.channel_id,
-                        // will change soon
-                        sequence_number: 0,
+                        sequence_number: sequence_counter.super_safe_lock(|c| *c),
                         job_id: message.share.job_id.parse::<u32>()?,
                         nonce: message.share.nonce.0,
                         ntime: message.share.time.0,
-                        // will change soon
-                        version: 0,
-                        extranonce: message.extranonce.try_into()?,
+                        version: version,
+                        extranonce: extranonce.try_into()?,
                     };
-                    // send message to channel manager for validation
-                    sv1_server_to_channel_manager_sender.send(Mining::SubmitSharesExtended(submit_share_extended));
+                    // send message to channel manager for validation with channel target
+                    sv1_server_to_channel_manager_sender
+                        .send(Mining::SubmitSharesExtended(submit_share_extended))
+                        .await;
+                    sequence_counter.super_safe_lock(|c| *c += 1);
                 }
             }
         }
@@ -158,23 +238,26 @@ impl Sv1Server {
 
     pub async fn handle_upstream_message(
         mut channel_manager_receiver: Receiver<Mining<'static>>,
-        downstream_sender: broadcast::Sender<(u32, json_rpc::Message)>,
-        downstream: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
+        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
         prevhash_mut: Arc<Mutex<Option<SetNewPrevHash<'static>>>>,
         clean_job_mut: Arc<Mutex<bool>>,
-    ) {
-        info!("Listening for upstream message inside sv1 server");
+        first_target: Target,
+    ) -> ProxyResult<'static, ()> {
         while let Ok(message) = channel_manager_receiver.recv().await {
-            info!("Received message from channel manager: {:?}", message);
             match message {
                 Mining::NewExtendedMiningJob(m) => {
+                    // if it's the first job, send the set difficulty
+                    if m.job_id == 1 {
+                        let set_difficulty = get_set_difficulty(first_target.clone()).unwrap();
+                        downstream_sender.send((m.channel_id, None, set_difficulty.into()));
+                    }
                     let prevhash = prevhash_mut.super_safe_lock(|ph| ph.clone());
                     let clean_job = clean_job_mut.super_safe_lock(|c| *c);
                     if let Some(prevhash) = prevhash {
                         let notify = create_notify(prevhash, m.clone().into_static(), clean_job);
                         clean_job_mut.super_safe_lock(|c| *c = false);
-                        info!("Broadcasting notify to all downstreams: {:?}", notify);
-                        let _ = downstream_sender.send((m.channel_id, notify.into()));
+                        let _ = downstream_sender.send((m.channel_id, None, notify.into()));
                     }
                 }
                 Mining::SetNewPrevHash(m) => {
@@ -198,32 +281,21 @@ impl Sv1Server {
                 }
                 Mining::SubmitSharesSuccess(m) => {
                     info!("Received submit share success: {:?}", m);
-                    if let Some(downstream) = Self::get_downstream(m.channel_id, downstream.clone())
-                    {
-                        let downstream_id = Self::get_downstream_id(downstream.clone());
-                        // Send response from upstream to miner
-                        // let submit_share = server_to_client::GeneralResponse::into_submit(self);
-                        // sv1_server_to_downstream_sender.send((downstream_id,
-                        // submit_share.into()));
-                    }
                 }
                 Mining::SetTarget(m) => {
                     unreachable!()
                 }
                 Mining::OpenExtendedMiningChannelSuccess(m) => {
                     let downstream_id = m.request_id;
-                    let downstream = Self::get_downstream(downstream_id, downstream.clone());
+                    let downstream = Self::get_downstream(downstream_id, downstreams.clone());
                     if let Some(downstream) = downstream {
                         downstream.safe_lock(|d| {
                             d.extranonce1 = m.extranonce_prefix.to_vec();
                             d.extranonce2_len = m.extranonce_size.into();
                             d.channel_id = Some(m.channel_id);
                         });
-                        let extranonce_msg = server_to_client::SetExtranonce {
-                            extra_nonce1: m.extranonce_prefix.into(),
-                            extra_nonce2_size: m.extranonce_size.into(),
-                        };
-                        downstream_sender.send((m.channel_id, extranonce_msg.into()));
+                        Downstream::spawn_downstream_receiver(downstream.clone());
+                        Downstream::spawn_downstream_sender(downstream.clone());
                     } else {
                         error!("Downstream not found for downstream id: {}", downstream_id);
                     }
@@ -231,6 +303,7 @@ impl Sv1Server {
                 _ => {}
             }
         }
+        Ok(())
     }
 
     pub async fn open_extended_mining_channel(
@@ -238,48 +311,35 @@ impl Sv1Server {
         connection: ConnectionSV1,
         downstream: Arc<Mutex<Downstream>>,
     ) -> ProxyResult<'static, Option<u32>> {
-        let subscribe = connection.receiver().recv().await?;
-        //let channel_manager_receiver =
-        //    self.channel_manager_receiver.clone();
-        let subscribe = downstream.super_safe_lock(|d| d.handle_message(subscribe)).unwrap().unwrap();
-        connection.send(v1::Message::OkResponse(subscribe)).await;
-        let authorize_msg = connection.receiver().recv().await?;
-        
-        // Extract the user identity from the authorize message
-        let user_identity = match &authorize_msg {
-            v1::Message::StandardRequest(req) => {
-                match v1::client_to_server::Authorize::try_from(req.clone()) {
-                    Ok(auth) => auth.name.clone(),
-                    Err(_) => "unknown".to_string(),
-                }
-            }
-            _ => "unknown".to_string(),
-        };
-        let hashrate = self.config.downstream_difficulty_config.min_individual_miner_hashrate as f64;
+        let hashrate = self
+            .config
+            .downstream_difficulty_config
+            .min_individual_miner_hashrate as f64;
         let share_per_min: f64 = self.config.downstream_difficulty_config.shares_per_minute as f64;
-        let min_extranonce_size= self.config.min_extranonce2_size;
-        
-        let authorize = downstream.super_safe_lock(|d| d.handle_message(authorize_msg)).unwrap().unwrap();
-        connection.send(v1::Message::OkResponse(authorize)).await;
-
+        let min_extranonce_size = self.config.min_extranonce2_size;
         let initial_target: Target = hash_rate_to_target(hashrate, share_per_min).unwrap().into();
-        let set_difficulty = get_set_difficulty(initial_target.clone()).unwrap();
-        connection.send(set_difficulty).await;
 
-        // Create OpenExtendedMiningChannel message with the extracted user identity
+        // Get the next miner counter and create unique user identity
+        let miner_number = self.miner_counter.super_safe_lock(|c| {
+            *c += 1;
+            *c
+        });
+        let user_identity = format!("{}.miner{}", self.config.user_identity, miner_number);
+
+        // Create OpenExtendedMiningChannel message with the unique user identity
         let open_channel_msg = roles_logic_sv2::mining_sv2::OpenExtendedMiningChannel {
             request_id: downstream.super_safe_lock(|d| d.downstream_id),
-            user_identity: user_identity.clone().try_into()?,
+            user_identity: user_identity.try_into()?,
             nominal_hash_rate: hashrate as f32,
             max_target: initial_target.into(),
-            min_extranonce_size: min_extranonce_size, 
+            min_extranonce_size: min_extranonce_size,
         };
-        
+
         let open_upstream_channel = self
             .channel_manager_sender
             .send(Mining::OpenExtendedMiningChannel(open_channel_msg))
             .await;
-        
+
         Ok(None)
     }
 
@@ -287,12 +347,90 @@ impl Sv1Server {
         downstream_id: u32,
         downstream: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
     ) -> Option<Arc<Mutex<Downstream>>> {
-        info!("Getting downstream for downstream id: {:?}", downstream_id);
-        downstream.safe_lock(|c| c.get(&downstream_id).cloned()).unwrap_or(None)
+        downstream
+            .safe_lock(|c| c.get(&downstream_id).cloned())
+            .unwrap_or(None)
     }
 
     pub fn get_downstream_id(downstream: Arc<Mutex<Downstream>>) -> u32 {
         let id = downstream.safe_lock(|s| s.downstream_id);
         return id.unwrap();
+    }
+
+    /// This method implements the SV1 server's variable difficulty logic for all downstreams.
+    /// Every 60 seconds, this method updates the difficulty state for each downstream.
+    async fn spawn_vardiff_loop(
+        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
+        downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
+        shares_per_minute: f32,
+    ) {
+        info!("Spawning vardiff adjustment loop for SV1 server");
+
+        'vardiff_loop: loop {
+            time::sleep(Duration::from_secs(60)).await;
+            info!("Starting vardiff updates for SV1 server");
+            let vardiff_map = vardiff.safe_lock(|v| v.clone()).unwrap();
+            let mut updates = Vec::new();
+            for (downstream_id, vardiff_state) in vardiff_map.iter() {
+                info!("Updating vardiff for downstream_id: {}", downstream_id);
+                let mut vardiff = vardiff_state.write().unwrap();
+                // Get hashrate and target from downstreams
+                let (channel_id, hashrate, target) = match downstreams.safe_lock(|dmap| {
+                    dmap.get(downstream_id).map(|d| {
+                        let d = d.safe_lock(|d| d.clone()).unwrap();
+                        (d.channel_id, d.hashrate, d.target.clone())
+                    })
+                }) {
+                    Ok(Some((channel_id, hashrate, target))) => (channel_id, hashrate, target),
+                    _ => continue,
+                };
+                if channel_id.is_none() {
+                    error!("Channel id is none for downstream_id: {}", downstream_id);
+                    continue;
+                }
+                let channel_id = channel_id.unwrap();
+                let new_hashrate_opt = vardiff.try_vardiff(hashrate, &target, shares_per_minute);
+
+                if let Ok(Some(new_hashrate)) = new_hashrate_opt {
+                    // Calculate new target based on new hashrate
+                    let new_target: Target =
+                        hash_rate_to_target(new_hashrate as f64, shares_per_minute as f64)
+                            .unwrap()
+                            .into();
+
+                    // Update the downstream's pending target and hashrate
+                    downstreams.safe_lock(|dmap| {
+                        if let Some(d) = dmap.get(downstream_id) {
+                            d.safe_lock(|d| {
+                                d.set_pending_target_and_hashrate(new_target.clone(), new_hashrate);
+                            });
+                        }
+                    });
+
+                    updates.push((channel_id, Some(*downstream_id), new_target.clone()));
+
+                    debug!(
+                        "Calculated new target for downstream_id={} to {:?}",
+                        downstream_id, new_target
+                    );
+                }
+            }
+
+            for (channel_id, downstream_id, target) in updates {
+                if let Ok(set_difficulty_msg) = get_set_difficulty(target) {
+                    if let Err(e) =
+                        downstream_sender.send((channel_id, downstream_id, set_difficulty_msg))
+                    {
+                        error!(
+                            "Failed to send SetDifficulty message to downstream {}: {:?}",
+                            downstream_id.unwrap_or(0),
+                            e
+                        );
+                        break 'vardiff_loop;
+                    }
+                }
+            }
+        }
     }
 }
