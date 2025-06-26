@@ -3,8 +3,7 @@ use std::sync::{Arc, RwLock};
 use crate::{sv1::downstream::Downstream, sv2::ChannelManager};
 use roles_logic_sv2::{
     channels::client::extended::ExtendedChannel,
-    common_messages_sv2::{Protocol, SetupConnectionSuccess},
-    common_properties::{IsMiningUpstream, IsUpstream},
+    common_properties::IsMiningUpstream,
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
     mining_sv2::{
         NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget,
@@ -13,13 +12,7 @@ use roles_logic_sv2::{
     Error as RolesLogicError,
 };
 
-use roles_logic_sv2::{
-    common_messages_sv2::{ChannelEndpointChanged, Reconnect, SetupConnectionError},
-    handlers::common::{ParseCommonMessagesFromUpstream, SendTo as SendToCommon},
-    Error,
-};
-
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     fn get_channel_type(&self) -> roles_logic_sv2::handlers::mining::SupportedChannelTypes {
         SupportedChannelTypes::Extended
@@ -45,7 +38,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
             .pending_channels
             .remove(&m.request_id)
             .unwrap_or_else(|| ("unknown".to_string(), 100000.0));
-        
+
         info!(
             "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}, user: {}, hashrate: {}",
             m.request_id, m.channel_id, user_identity, nominal_hashrate
@@ -91,9 +84,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
             "Received UpdateChannelError with error code {}",
             std::str::from_utf8(m.error_code.as_ref()).unwrap_or("unknown error code")
         );
-        Ok(SendTo::None(Some(Mining::UpdateChannelError(
-            m.as_static(),
-        ))))
+        Ok(SendTo::None(None))
     }
 
     fn handle_close_channel(
@@ -101,14 +92,15 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         m: roles_logic_sv2::mining_sv2::CloseChannel,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         info!("Received CloseChannel for channel id: {}", m.channel_id);
-        Ok(SendTo::None(Some(Mining::CloseChannel(m.as_static()))))
+        self.extended_channels.remove(&m.channel_id);
+        Ok(SendTo::None(None))
     }
 
     fn handle_set_extranonce_prefix(
         &mut self,
         m: roles_logic_sv2::mining_sv2::SetExtranoncePrefix,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        unreachable!("Cannot process SetExtranoncePrefix since set_extranonce is not supported for majority of sv1 clients");
     }
 
     fn handle_submit_shares_success(
@@ -117,25 +109,24 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         info!("Received SubmitSharesSuccess");
         debug!("SubmitSharesSuccess: {:?}", m);
-        Ok(SendTo::None(Some(Mining::SubmitSharesSuccess(
-            m.into_static(),
-        ))))
+        Ok(SendTo::None(None))
     }
 
     fn handle_submit_shares_error(
         &mut self,
         m: roles_logic_sv2::mining_sv2::SubmitSharesError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        Ok(SendTo::None(Some(Mining::SubmitSharesError(
-            m.into_static(),
-        ))))
+        warn!("Received SubmitSharesError: {:?}", m);
+        Ok(SendTo::None(None))
     }
 
     fn handle_new_mining_job(
         &mut self,
         m: roles_logic_sv2::mining_sv2::NewMiningJob,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        unreachable!()
+        unreachable!(
+            "Cannot process NewMiningJob since Translator Proxy supports only extended mining jobs"
+        )
     }
 
     fn handle_new_extended_mining_job(
@@ -168,14 +159,14 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         &mut self,
         m: roles_logic_sv2::mining_sv2::SetCustomMiningJobSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        unreachable!()
+        unreachable!("Cannot process SetCustomMiningJobSuccess since Translator Proxy does not support custom mining jobs")
     }
 
     fn handle_set_custom_mining_job_error(
         &mut self,
         m: roles_logic_sv2::mining_sv2::SetCustomMiningJobError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        unreachable!()
+        unreachable!("Cannot process SetCustomMiningJobError since Translator Proxy does not support custom mining jobs")
     }
 
     fn handle_set_target(&mut self, m: SetTarget) -> Result<SendTo<Downstream>, RolesLogicError> {
@@ -186,44 +177,15 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
             .write()
             .unwrap();
         extended_channel.set_target(m.maximum_target.clone().into());
-        Ok(SendTo::None(Some(Mining::SetTarget(m.into_static()))))
+        Ok(SendTo::None(None))
     }
 
     fn handle_set_group_channel(
         &mut self,
         _m: roles_logic_sv2::mining_sv2::SetGroupChannel,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        unreachable!()
-    }
-}
-
-impl ParseCommonMessagesFromUpstream for ChannelManager {
-    fn handle_setup_connection_success(
-        &mut self,
-        m: SetupConnectionSuccess,
-    ) -> Result<SendToCommon, Error> {
-        info!(
-            "Received `SetupConnectionSuccess`: version={}, flags={:b}",
-            m.used_version, m.flags
-        );
-        Ok(SendToCommon::None(None))
-    }
-
-    fn handle_setup_connection_error(
-        &mut self,
-        _m: SetupConnectionError,
-    ) -> Result<SendToCommon, Error> {
-        todo!()
-    }
-
-    fn handle_channel_endpoint_changed(
-        &mut self,
-        _m: ChannelEndpointChanged,
-    ) -> Result<SendToCommon, Error> {
-        todo!()
-    }
-
-    fn handle_reconnect(&mut self, _m: Reconnect) -> Result<SendToCommon, Error> {
-        todo!()
+        unreachable!(
+            "Cannot process SetGroupChannel since Translator Proxy does not support group channels"
+        )
     }
 }

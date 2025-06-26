@@ -2,13 +2,11 @@ mod args;
 use args::Args;
 use config::TranslatorConfig;
 use error::{Error, ProxyResult};
-pub use new_translator_sv2::{
-    config, sv1, error, sv2, status, TranslatorSv2,
-};
+pub use new_translator_sv2::{config, error, status, sv1, sv2, TranslatorSv2};
 
 use ext_config::{Config, File, FileFormat};
 
-use tracing::{error, info};
+use tracing::error;
 
 /// Process CLI args, if any.
 #[allow(clippy::result_large_err)]
@@ -46,7 +44,6 @@ async fn main() {
         Ok(p) => p,
         Err(e) => panic!("failed to load config: {e}"),
     };
-    info!("Proxy Config: {:?}", &proxy_config);
 
     TranslatorSv2::new(proxy_config).start().await;
 }
