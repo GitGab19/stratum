@@ -23,7 +23,7 @@ use config::TranslatorConfig;
 
 use crate::{
     sv1::sv1_server::Sv1Server,
-    sv2::{ChannelManager, ChannelMappingMode, Upstream},
+    sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream},
 };
 
 pub mod config;
@@ -92,7 +92,11 @@ impl TranslatorSv2 {
             upstream_to_channel_manager_receiver,
             channel_manager_to_sv1_server_sender.clone(),
             sv1_server_to_channel_manager_receiver,
-            ChannelMappingMode::PerClient,
+            if self.config.aggregate_channels {
+                ChannelMode::Aggregated
+            } else {
+                ChannelMode::NonAggregated
+            },
         )));
 
         let downstream_addr: SocketAddr = SocketAddr::new(

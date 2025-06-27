@@ -1,15 +1,10 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{sv1::downstream::Downstream, sv2::ChannelManager};
+use crate::{sv1::downstream::Downstream, sv2::{ChannelManager, ChannelMode}, utils::proxy_extranonce_prefix_len};
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel,
-    common_properties::IsMiningUpstream,
-    handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
-    mining_sv2::{
-        NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget,
-    },
-    parsers::Mining,
-    Error as RolesLogicError,
+    channels::client::extended::ExtendedChannel, common_properties::IsMiningUpstream, handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes}, mining_sv2::{
+        ExtendedExtranonce, MAX_EXTRANONCE_LEN, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget
+    }, parsers::Mining, utils::Mutex, Error as RolesLogicError
 };
 
 use tracing::{debug, error, info, warn};
@@ -34,10 +29,10 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         m: OpenExtendedMiningChannelSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         // Get the stored user identity and hashrate using request_id as downstream_id
-        let (user_identity, nominal_hashrate) = self
+        let (user_identity, nominal_hashrate, downstream_extranonce_len) = self
             .pending_channels
             .remove(&m.request_id)
-            .unwrap_or_else(|| ("unknown".to_string(), 100000.0));
+            .unwrap_or_else(|| ("unknown".to_string(), 100000.0, 0 as usize));
 
         info!(
             "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}, user: {}, hashrate: {}",
@@ -51,7 +46,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         let extended_channel = ExtendedChannel::new(
             m.channel_id,
             user_identity,
-            extranonce_prefix,
+            extranonce_prefix.clone(),
             target.into(),
             nominal_hashrate,
             version_rolling,
@@ -59,6 +54,16 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         );
         self.extended_channels
             .insert(m.channel_id, Arc::new(RwLock::new(extended_channel)));
+
+        if self.mode == ChannelMode::Aggregated {
+            let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(extranonce_prefix.len().into(), downstream_extranonce_len.into());
+            let range_0 = 0..extranonce_prefix.len();
+            let range1 = range_0.end..range_0.end + translator_proxy_extranonce_prefix_len;
+            let range2 = range1.end..MAX_EXTRANONCE_LEN;
+            let extended_extranonce_factory = ExtendedExtranonce::new(range_0, range1, range2, None).unwrap();
+            self.extranonce_prefix_factory_extended = Some(Arc::new(Mutex::new(extended_extranonce_factory)));
+        }
+
         let m = Mining::OpenExtendedMiningChannelSuccess(m.into_static());
         Ok(SendTo::None(Some(m)))
     }
