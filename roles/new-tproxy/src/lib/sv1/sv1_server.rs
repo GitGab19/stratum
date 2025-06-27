@@ -246,6 +246,21 @@ impl Sv1Server {
     ) -> ProxyResult<'static, ()> {
         while let Ok(message) = channel_manager_receiver.recv().await {
             match message {
+                Mining::OpenExtendedMiningChannelSuccess(m) => {
+                    let downstream_id = m.request_id;
+                    let downstream = Self::get_downstream(downstream_id, downstreams.clone());
+                    if let Some(downstream) = downstream {
+                        downstream.safe_lock(|d| {
+                            d.extranonce1 = m.extranonce_prefix.to_vec();
+                            d.extranonce2_len = m.extranonce_size.into();
+                            d.channel_id = Some(m.channel_id);
+                        });
+                        Downstream::spawn_downstream_receiver(downstream.clone());
+                        Downstream::spawn_downstream_sender(downstream.clone());
+                    } else {
+                        error!("Downstream not found for downstream id: {}", downstream_id);
+                    }
+                }
                 Mining::NewExtendedMiningJob(m) => {
                     // if it's the first job, send the set difficulty
                     if m.job_id == 1 {
@@ -265,42 +280,15 @@ impl Sv1Server {
                     clean_job_mut.super_safe_lock(|c| *c = true);
                 }
                 Mining::CloseChannel(m) => {
-                    info!("I got close channel: {:?}", m);
+                    todo!()
                 }
                 Mining::OpenMiningChannelError(m) => {
-                    info!("I got open mining channel: {:?}", m);
+                    todo!()
                 }
                 Mining::UpdateChannelError(m) => {
-                    info!("I got update channel error: {:?}", m);
-                }
-                Mining::SubmitSharesError(m) => {
-                    info!("I got submit share error: {:?}", m);
-                }
-                Mining::SetCustomMiningJobError(m) => {
-                    info!("I got set custom mining job: {:?}", m);
-                }
-                Mining::SubmitSharesSuccess(m) => {
-                    info!("Received submit share success: {:?}", m);
-                }
-                Mining::SetTarget(m) => {
-                    unreachable!()
-                }
-                Mining::OpenExtendedMiningChannelSuccess(m) => {
-                    let downstream_id = m.request_id;
-                    let downstream = Self::get_downstream(downstream_id, downstreams.clone());
-                    if let Some(downstream) = downstream {
-                        downstream.safe_lock(|d| {
-                            d.extranonce1 = m.extranonce_prefix.to_vec();
-                            d.extranonce2_len = m.extranonce_size.into();
-                            d.channel_id = Some(m.channel_id);
-                        });
-                        Downstream::spawn_downstream_receiver(downstream.clone());
-                        Downstream::spawn_downstream_sender(downstream.clone());
-                    } else {
-                        error!("Downstream not found for downstream id: {}", downstream_id);
-                    }
-                }
-                _ => {}
+                    todo!()
+                }                
+                _ => unreachable!()
             }
         }
         Ok(())

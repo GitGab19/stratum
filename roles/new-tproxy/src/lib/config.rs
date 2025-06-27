@@ -10,7 +10,6 @@
 //! - Downstream interface address and port ([`DownstreamConfig`])
 //! - Supported protocol versions
 //! - Downstream difficulty adjustment parameters ([`DownstreamDifficultyConfig`])
-//! - Upstream difficulty adjustment parameters ([`UpstreamDifficultyConfig`])
 use key_utils::Secp256k1PublicKey;
 use serde::Deserialize;
 
@@ -39,8 +38,9 @@ pub struct TranslatorConfig {
     pub user_identity: String,
     /// Configuration settings for managing difficulty on the downstream connection.
     pub downstream_difficulty_config: DownstreamDifficultyConfig,
-    /// Configuration settings for managing difficulty on the upstream connection.
-    pub upstream_difficulty_config: UpstreamDifficultyConfig,
+    /// Whether to aggregate all downstream connections into a single upstream channel.
+    /// If true, all miners share one channel. If false, each miner gets its own channel.
+    pub aggregate_channels: bool,
 }
 /// Configuration settings specific to the upstream connection.
 pub struct UpstreamConfig {
@@ -50,8 +50,6 @@ pub struct UpstreamConfig {
     port: u16,
     /// The Secp256k1 public key used to authenticate the upstream authority.
     authority_pubkey: Secp256k1PublicKey,
-    /// Configuration settings for managing difficulty on the upstream connection.
-    difficulty_config: UpstreamDifficultyConfig,
 }
 
 impl UpstreamConfig {
@@ -60,13 +58,11 @@ impl UpstreamConfig {
         address: String,
         port: u16,
         authority_pubkey: Secp256k1PublicKey,
-        difficulty_config: UpstreamDifficultyConfig,
     ) -> Self {
         Self {
             address,
             port,
             authority_pubkey,
-            difficulty_config,
         }
     }
 }
@@ -102,6 +98,7 @@ impl TranslatorConfig {
         min_supported_version: u16,
         min_extranonce2_size: u16,
         user_identity: String,
+        aggregate_channels: bool,
     ) -> Self {
         Self {
             upstream_address: upstream.address,
@@ -114,7 +111,7 @@ impl TranslatorConfig {
             min_extranonce2_size,
             user_identity,
             downstream_difficulty_config: downstream.difficulty_config,
-            upstream_difficulty_config: upstream.difficulty_config,
+            aggregate_channels,
         }
     }
 }
@@ -154,37 +151,5 @@ impl PartialEq for DownstreamDifficultyConfig {
     fn eq(&self, other: &Self) -> bool {
         other.min_individual_miner_hashrate.round() as u32
             == self.min_individual_miner_hashrate.round() as u32
-    }
-}
-
-/// Configuration settings for difficulty adjustments on the upstream connection.
-#[derive(Debug, Deserialize, Clone)]
-pub struct UpstreamDifficultyConfig {
-    /// The interval in seconds at which the channel difficulty should be updated.
-    pub channel_diff_update_interval: u32,
-    /// The nominal hashrate for the channel, used in difficulty calculations.
-    pub channel_nominal_hashrate: f32,
-    /// The timestamp of the last difficulty update for the channel.
-    #[serde(default = "u64::default")]
-    pub timestamp_of_last_update: u64,
-    /// Indicates whether shares from downstream should be aggregated before submitting upstream.
-    #[serde(default = "bool::default")]
-    pub should_aggregate: bool,
-}
-
-impl UpstreamDifficultyConfig {
-    /// Creates a new `UpstreamDifficultyConfig` instance.
-    pub fn new(
-        channel_diff_update_interval: u32,
-        channel_nominal_hashrate: f32,
-        timestamp_of_last_update: u64,
-        should_aggregate: bool,
-    ) -> Self {
-        Self {
-            channel_diff_update_interval,
-            channel_nominal_hashrate,
-            timestamp_of_last_update,
-            should_aggregate,
-        }
     }
 }
