@@ -326,6 +326,10 @@ impl Sv1Server {
         });
         let user_identity = format!("{}.miner{}", self.config.user_identity, miner_number);
 
+        downstream.safe_lock(|d| {
+            d.user_identity = user_identity.clone();
+        });
+
         // Create OpenExtendedMiningChannel message with the unique user identity
         let open_channel_msg = roles_logic_sv2::mining_sv2::OpenExtendedMiningChannel {
             request_id: downstream.super_safe_lock(|d| d.downstream_id),
