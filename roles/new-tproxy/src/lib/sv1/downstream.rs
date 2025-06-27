@@ -33,7 +33,8 @@ pub struct Downstream {
     version_rolling_mask: Option<HexU32Be>,
     version_rolling_min_bit: Option<HexU32Be>,
     last_job_version_field: Option<u32>,
-    authorized_names: Vec<String>,
+    authorized_worker_names: Vec<String>, //this is the list of worker names that are authorized to submit shares to this downstream
+    pub user_identity: String, //this is the user identity used by the sv1 server to open the channel for this downstream
     valid_jobs: Vec<server_to_client::Notify<'static>>,
     pub target: Target,
     pub hashrate: f32,
@@ -65,7 +66,8 @@ impl Downstream {
             version_rolling_mask: None,
             version_rolling_min_bit: None,
             last_job_version_field: None,
-            authorized_names: Vec::new(),
+            authorized_worker_names: Vec::new(),
+            user_identity: String::new(),
             valid_jobs: Vec::new(),
             target,
             hashrate,
@@ -316,12 +318,12 @@ impl IsServer<'static> for Downstream {
 
     /// Checks if a Downstream role is authorized.
     fn is_authorized(&self, name: &str) -> bool {
-        self.authorized_names.contains(&name.to_string())
+        self.authorized_worker_names.contains(&name.to_string())
     }
 
     /// Authorizes a Downstream role.
     fn authorize(&mut self, name: &str) {
-        self.authorized_names.push(name.to_string());
+        self.authorized_worker_names.push(name.to_string());
     }
 
     /// Sets the `extranonce1` field sent in the SV1 `mining.notify` message to the value specified
