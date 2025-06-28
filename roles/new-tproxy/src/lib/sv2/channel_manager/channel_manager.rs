@@ -10,7 +10,10 @@ use codec_sv2::Frame;
 use roles_logic_sv2::{
     channels::client::extended::ExtendedChannel,
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo},
-    mining_sv2::{ExtendedExtranonce, OpenExtendedMiningChannel, OpenExtendedMiningChannelSuccess, SubmitSharesError, SubmitSharesSuccess, Target},
+    mining_sv2::{
+        ExtendedExtranonce, OpenExtendedMiningChannel, OpenExtendedMiningChannelSuccess,
+        SubmitSharesError, SubmitSharesSuccess, Target,
+    },
     parsers::{AnyMessage, IsSv2Message, Mining},
     utils::{hash_rate_to_target, Mutex},
 };
@@ -18,7 +21,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 pub type Sv2Message = Mining<'static>;
@@ -37,7 +40,8 @@ pub struct ChannelManager {
     sv1_server_receiver: Receiver<Mining<'static>>,
     pub mode: ChannelMode,
     // Store pending channel info by downstream_id
-    pub pending_channels: HashMap<u32, (String, f32, usize)>, // (user_identity, hashrate, downstream_extranonce_len)
+    pub pending_channels: HashMap<u32, (String, f32, usize)>, /* (user_identity, hashrate,
+                                                               * downstream_extranonce_len) */
     pub extended_channels: HashMap<u32, Arc<RwLock<ExtendedChannel<'static>>>>,
     pub upstream_extended_channel: Option<Arc<RwLock<ExtendedChannel<'static>>>>, // This is the upstream extended channel that is used in aggregated mode
     pub extranonce_prefix_factory: Option<Arc<Mutex<ExtendedExtranonce>>>, // This is the extranonce prefix factory that is used in aggregated mode to allocate unique extranonce prefixes
@@ -64,117 +68,141 @@ impl ChannelManager {
         }
     }
 
-    pub async fn on_upstream_message(self_: Arc<Mutex<Self>>) {
+    pub async fn on_upstream_message(
+        self_: Arc<Mutex<Self>>,
+        notify_shutdown: broadcast::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>,
+    ) {
+        let (upstream_receiver, upstream_sender, sv1_server_sender) = self_.super_safe_lock(|e| {
+            (
+                e.upstream_receiver.clone(),
+                e.upstream_sender.clone(),
+                e.sv1_server_sender.clone(),
+            )
+        });
+        let mut notify_shutdown = notify_shutdown.subscribe();
         tokio::spawn(async move {
-            let (upstream_receiver, upstream_sender, sv1_server_sender) =
-                self_.super_safe_lock(|e| {
-                    (
-                        e.upstream_receiver.clone(),
-                        e.upstream_sender.clone(),
-                        e.sv1_server_sender.clone(),
-                    )
-                });
-            while let Ok(message) = upstream_receiver.recv().await {
-                if let Frame::Sv2(mut frame) = message {
-                    if let Some(header) = frame.get_header() {
-                        let message_type = header.msg_type();
-
-                        let mut payload = frame.payload().to_vec();
-                        // let mut payload1 = payload.clone();
-                        let message: AnyMessage<'_> =
-                            into_static((message_type, payload.as_mut_slice()).try_into().unwrap())
-                                .unwrap();
-
+            loop {
+                tokio::select! {
+                    _ = notify_shutdown.recv() => {
+                        info!("Channel Manager:Upstream Message task received shutdown signal. Exiting loop.");
+                        break;
+                    }
+                    message = upstream_receiver.recv() => {
                         match message {
-                            Message::Mining(mining_message) => {
-                                let message =
-                                    ParseMiningMessagesFromUpstream::handle_message_mining(
-                                        self_.clone(),
-                                        message_type,
-                                        payload.as_mut_slice(),
-                                    );
-                                if let Ok(message) = message {
-                                    match message {
-                                        SendTo::Respond(message_for_upstream) => {
-                                            let message = Message::Mining(message_for_upstream);
+                            Ok(message) => {
+                                if let Frame::Sv2(mut frame) = message {
+                                    if let Some(header) = frame.get_header() {
+                                        let message_type = header.msg_type();
 
-                                            let frame: StdFrame = message.try_into().unwrap();
-                                            let frame: EitherFrame = frame.into();
-                                            upstream_sender.send(frame).await;
-                                        }
-                                        SendTo::None(Some(m)) => {
-                                            match m {
-                                                // Implemented message handlers
-                                                Mining::SetNewPrevHash(v) => {
-                                                    sv1_server_sender
-                                                        .send(Mining::SetNewPrevHash(v.clone()))
-                                                        .await;
-                                                    let mode = self_.super_safe_lock(|c| c.mode.clone());
+                                        let mut payload = frame.payload().to_vec();
+                                        // let mut payload1 = payload.clone();
+                                        let message: AnyMessage<'_> =
+                                            into_static((message_type, payload.as_mut_slice()).try_into().unwrap())
+                                                .unwrap();
+
+                                        match message {
+                                            Message::Mining(mining_message) => {
+                                                let message =
+                                                    ParseMiningMessagesFromUpstream::handle_message_mining(
+                                                        self_.clone(),
+                                                        message_type,
+                                                        payload.as_mut_slice(),
+                                                    );
+                                                if let Ok(message) = message {
+                                                    match message {
+                                                        SendTo::Respond(message_for_upstream) => {
+                                                            let message = Message::Mining(message_for_upstream);
+
+                                                            let frame: StdFrame = message.try_into().unwrap();
+                                                            let frame: EitherFrame = frame.into();
+                                                            upstream_sender.send(frame).await;
+                                                        }
+                                                        SendTo::None(Some(m)) => {
+                                                            match m {
+                                                                // Implemented message handlers
+                                                                Mining::SetNewPrevHash(v) => {
+                                                                    sv1_server_sender
+                                                                        .send(Mining::SetNewPrevHash(v.clone()))
+                                                                        .await;
+                                                                    let mode = self_.super_safe_lock(|c| c.mode.clone());
                                                     let active_job = if mode == ChannelMode::Aggregated {
                                                         self_.super_safe_lock(|c| {
                                                             c.upstream_extended_channel.as_ref().unwrap().read().unwrap().get_active_job().map(|job| job.0.clone())
                                                         })
                                                     } else {
                                                         self_.super_safe_lock(|c| {
-                                                            c.extended_channels
-                                                                .get(&v.channel_id)
-                                                                .and_then(|extended_channel| {
-                                                                    extended_channel
-                                                                        .read()
-                                                                        .ok()
-                                                                        .and_then(|channel| {
-                                                                            channel
-                                                                                .get_active_job()
-                                                                                .map(|job| {
-                                                                                    job.0.clone()
+                                                                            c.extended_channels
+                                                                                .get(&v.channel_id)
+                                                                                .and_then(|extended_channel| {
+                                                                                    extended_channel
+                                                                                        .read()
+                                                                                        .ok()
+                                                                                        .and_then(|channel| {
+                                                                                            channel
+                                                                                                .get_active_job()
+                                                                                                .map(|job| {
+                                                                                                    job.0.clone()
+                                                                                                })
+                                                                                        })
                                                                                 })
                                                                         })
-                                                                })
-                                                        })
                                                     };
                                                         
-                                                    if let Some(active_job) = active_job {
-                                                        sv1_server_sender
-                                                            .send(Mining::NewExtendedMiningJob(
-                                                                active_job,
-                                                            ))
-                                                            .await;
-                                                    }
-                                                }
-                                                Mining::NewExtendedMiningJob(v) => {
-                                                    if v.is_future() {
-                                                        continue; // we wait for the SetNewPrevHash
-                                                                  // in this case and we don't send
-                                                                  // anything to sv1 server
-                                                    }
-                                                    sv1_server_sender
-                                                        .send(Mining::NewExtendedMiningJob(
-                                                            v.clone(),
-                                                        ))
-                                                        .await;
-                                                }
-                                                Mining::OpenExtendedMiningChannelSuccess(v) => {
-                                                    sv1_server_sender.send(Mining::OpenExtendedMiningChannelSuccess(v.clone())).await;
-                                                }
+                                                                    if let Some(active_job) = active_job {
+                                                                        sv1_server_sender
+                                                                            .send(Mining::NewExtendedMiningJob(
+                                                                                active_job,
+                                                                            ))
+                                                                            .await;
+                                                                    }
+                                                                }
+                                                                Mining::NewExtendedMiningJob(v) => {
+                                                                    if v.is_future() {
+                                                                        continue; // we wait for the SetNewPrevHash
+                                                                                  // in this case and we don't send
+                                                                                  // anything to sv1 server
+                                                                    }
+                                                                    sv1_server_sender
+                                                                        .send(Mining::NewExtendedMiningJob(
+                                                                            v.clone(),
+                                                                        ))
+                                                                        .await;
+                                                                }
+                                                                Mining::OpenExtendedMiningChannelSuccess(v) => {
+                                                                    sv1_server_sender.send(Mining::OpenExtendedMiningChannelSuccess(v.clone())).await;
+                                                                }
 
-                                                // TODO: Implement these handlers
-                                                Mining::OpenMiningChannelError(_) => todo!(),
-                                                // Unreachable - not supported in this
-                                                // implementation
-                                                _ => unreachable!(),
+                                                                // TODO: Implement these handlers
+                                                                Mining::OpenMiningChannelError(_) => todo!(),
+                                                                // Unreachable - not supported in this
+                                                                // implementation
+                                                                _ => unreachable!(),
+                                                            }
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                warn!("Received unknown message type from upstream: {:?}", message);
                                             }
                                         }
-                                        _ => {}
                                     }
                                 }
                             }
-                            _ => {
-                                warn!("Received unknown message type from upstream: {:?}", message);
+                            Err(e) => {
+                                break;
                             }
                         }
                     }
                 }
             }
+            upstream_receiver.close();
+            upstream_sender.close();
+            sv1_server_sender.close();
+            drop(shutdown_complete_tx);
+            warn!("Channel Manager:Upstream Message task loop exited.");
         });
     }
 
@@ -310,25 +338,41 @@ impl ChannelManager {
                             }
                         }
 
-                        // Store the user identity and hashrate
-                        self_.super_safe_lock(|c| {
-                            c.pending_channels
-                                .insert(open_channel_msg.request_id, (user_identity, hashrate, min_extranonce_size));
-                        });
+                                        // Store the user identity and hashrate
+                                        self_.super_safe_lock(|c| {
+                                            c.pending_channels.insert(
+                                                open_channel_msg.request_id,
+                                                (user_identity, hashrate, min_extranonce_size),
+                                            );
+                                        });
 
-                        let frame = StdFrame::try_from(Message::Mining(
-                            roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_channel_msg),
-                        ))
-                        .unwrap();
-                    
-                        upstream_sender.send(frame.into()).await.map_err(|e| {
-                            error!("Failed to send open channel message to upstream: {:?}", e);
-                            e
-                        });
+                                        let frame = StdFrame::try_from(Message::Mining(
+                                            roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(
+                                                open_channel_msg,
+                                            ),
+                                        ))
+                                        .unwrap();
+
+                                        upstream_sender.send(frame.into()).await.map_err(|e| {
+                                            error!("Failed to send open channel message to upstream: {:?}", e);
+                                            e
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            },
+                            Err(e) => {
+                                break;
+                            }
+                        }
                     }
-                    _ => {}
                 }
             }
+            sv1_server_receiver.close();
+            sv1_server_sender.close();
+            upstream_sender.close();
+            drop(shutdown_complete_tx);
+            warn!("Channel Manager:Downstream Message task exited loop.");
         });
     }
 }
