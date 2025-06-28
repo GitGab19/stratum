@@ -112,7 +112,7 @@ impl Upstream {
     }
 
     /// Handles SV2 handshake setup with the upstream.
-    pub async fn setup_connection(&mut self) -> ProxyResult<'static, ()> {
+    pub async fn setup_connection(&self) -> ProxyResult<'static, ()> {
         info!("Setting up SV2 connection with upstream.");
 
         let sender = self.upstream_sender.clone();
