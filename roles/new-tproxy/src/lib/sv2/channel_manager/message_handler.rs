@@ -1,6 +1,10 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{sv1::downstream::Downstream, sv2::{ChannelManager, ChannelMode}, utils::proxy_extranonce_prefix_len};
+use crate::{
+    sv1::downstream::Downstream,
+    sv2::{ChannelManager, ChannelMode},
+    utils::proxy_extranonce_prefix_len,
+};
 use roles_logic_sv2::{
     channels::client::extended::ExtendedChannel, common_properties::IsMiningUpstream, handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes}, mining_sv2::{
         ExtendedExtranonce, Extranonce, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget, MAX_EXTRANONCE_LEN
