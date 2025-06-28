@@ -15,7 +15,7 @@ use async_channel::unbounded;
 pub use roles_logic_sv2::utils::Mutex;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub use v1::server_to_client;
 
@@ -53,6 +53,9 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
+        let (notify_shutdown, _) = tokio::sync::broadcast::channel::<()>(1);
+        let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel::<()>(1);
+
         let (channel_manager_to_upstream_sender, channel_manager_to_upstream_receiver) =
             unbounded();
 
@@ -77,6 +80,8 @@ impl TranslatorSv2 {
             self.config.upstream_authority_pubkey,
             upstream_to_channel_manager_sender.clone(),
             channel_manager_to_upstream_receiver.clone(),
+            notify_shutdown.clone(),
+            shutdown_complete_tx.clone(),
         )
         .await
         {
@@ -92,7 +97,7 @@ impl TranslatorSv2 {
             upstream_to_channel_manager_receiver,
             channel_manager_to_sv1_server_sender.clone(),
             sv1_server_to_channel_manager_receiver,
-            if self.config.aggregate_channels {
+            if !self.config.aggregate_channels {
                 ChannelMode::Aggregated
             } else {
                 ChannelMode::NonAggregated
@@ -111,13 +116,54 @@ impl TranslatorSv2 {
             self.config.clone(),
         );
 
-        ChannelManager::on_upstream_message(channel_manager.clone()).await;
-        ChannelManager::on_downstream_message(channel_manager).await;
+        ChannelManager::on_upstream_message(
+            channel_manager.clone(),
+            notify_shutdown.clone(),
+            shutdown_complete_tx.clone(),
+        )
+        .await;
+        ChannelManager::on_downstream_message(
+            channel_manager,
+            notify_shutdown.clone(),
+            shutdown_complete_tx.clone(),
+        )
+        .await;
 
-        if let Err(e) = upstream.start().await {
+        if let Err(e) = upstream
+            .start(notify_shutdown.clone(), shutdown_complete_tx.clone())
+            .await
+        {
             error!("Failed to start upstream listener: {:?}", e);
             return;
         }
-        sv1_server.start().await;
+        let notify_shutdown_clone = notify_shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("Ctrl+c received. Intiating graceful shutdown...");
+                        notify_shutdown_clone.send(()).unwrap();
+                        break;
+                    }
+                }
+            }
+            warn!("ctrl c block exited");
+        });
+
+        sv1_server
+            .start(notify_shutdown.clone(), shutdown_complete_tx.clone())
+            .await;
+
+        drop(shutdown_complete_tx);
+        info!("waiting for shutdown complete...");
+        let shutdown_timeout = tokio::time::Duration::from_secs(30);
+        tokio::select! {
+            _ = shutdown_complete_rx.recv() => {
+                info!("All tasks reported shutdown complete.");
+            }
+            _ = tokio::time::sleep(shutdown_timeout) => {
+                warn!("Graceful shutdown timed out after {:?}. Some tasks might still be running.", shutdown_timeout);
+            }
+        }
     }
 }
