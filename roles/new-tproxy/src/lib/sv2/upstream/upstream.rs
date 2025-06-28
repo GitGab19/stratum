@@ -15,6 +15,7 @@ use roles_logic_sv2::{
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpStream,
+    sync::{broadcast, mpsc},
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, warn};
@@ -41,6 +42,8 @@ impl Upstream {
         upstream_authority_public_key: Secp256k1PublicKey,
         channel_manager_sender: Sender<EitherFrame>,
         channel_manager_receiver: Receiver<EitherFrame>,
+        notify_shutdown: broadcast::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>,
     ) -> ProxyResult<'static, Self> {
         let socket = loop {
             match TcpStream::connect(upstream_address).await {
@@ -54,6 +57,11 @@ impl Upstream {
                         upstream_address, e
                     );
                     sleep(Duration::from_secs(5)).await;
+                    if notify_shutdown.subscribe().try_recv().is_ok() {
+                        info!("Shutdown signal received during upstream connection attempt. Aborting.");
+                        drop(shutdown_complete_tx);
+                        return Err(Error::Shutdown);
+                    }
                 }
             }
         };
@@ -77,10 +85,29 @@ impl Upstream {
         })
     }
 
-    pub async fn start(&mut self) -> ProxyResult<'static, ()> {
-        self.setup_connection().await?;
-        self.spawn_upstream_receiver()?;
-        self.spawn_upstream_sender()?;
+    pub async fn start(
+        &mut self,
+        notify_shutdown: broadcast::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>,
+    ) -> ProxyResult<'static, ()> {
+        info!("Upstream starting...");
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        tokio::select! {
+            result = self.setup_connection() => {
+                if let Err(e) = result {
+                    error!("Failed to setup SV2 connection with upstream: {:?}", e);
+                    drop(shutdown_complete_tx.clone());
+                    return Err(e);
+                }
+            },
+            _ = shutdown_rx.recv() => {
+                info!("Shutdown signal received during upstream setup connection. Aborting.");
+                drop(shutdown_complete_tx.clone());
+                return Ok(());
+            }
+        }
+        self.spawn_upstream_receiver(notify_shutdown.clone(), shutdown_complete_tx.clone())?;
+        self.spawn_upstream_sender(notify_shutdown, shutdown_complete_tx)?;
         Ok(())
     }
 
@@ -173,35 +200,83 @@ impl Upstream {
     }
 
     /// Spawns the upstream receiver task.
-    fn spawn_upstream_receiver(&self) -> ProxyResult<'static, ()> {
+    fn spawn_upstream_receiver(
+        &self,
+        notify_shutdown: broadcast::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>,
+    ) -> ProxyResult<'static, ()> {
         let upstream = self.clone();
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        let shutdown_complete_tx = shutdown_complete_tx.clone();
 
         tokio::spawn(async move {
-            while let Ok(message) = upstream.upstream_receiver.recv().await {
-                debug!("Received frame from upstream.");
-                if let Err(e) = upstream.on_upstream_message(message).await {
-                    error!("Error while processing upstream message: {:?}", e);
+            info!("Upstream receiver task started.");
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        info!("Upstream receiver task received shutdown signal. Exiting loop.");
+                        break;
+                    }
+                    message = upstream.upstream_receiver.recv() => {
+                        match message {
+                            Ok(msg) => {
+                                debug!("Received frame from upstream.");
+                                if let Err(e) = upstream.on_upstream_message(msg).await {
+                                    error!("Error while processing upstream message: {:?}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Upstream receiver channel error: {:?}. Exiting loop.", e);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-
+            upstream.upstream_receiver.close();
             warn!("Upstream receiver loop exited.");
+            drop(shutdown_complete_tx);
         });
 
         Ok(())
     }
 
     /// Spawns the upstream sender task.
-    fn spawn_upstream_sender(&self) -> ProxyResult<'static, ()> {
+    fn spawn_upstream_sender(
+        &self,
+        notify_shutdown: broadcast::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>,
+    ) -> ProxyResult<'static, ()> {
         let upstream = self.clone();
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        let shutdown_complete_tx = shutdown_complete_tx.clone();
 
         tokio::spawn(async move {
-            while let Ok(message) = upstream.channel_manager_receiver.recv().await {
-                debug!("Received message from channel manager to send upstream.");
-                if let Err(e) = upstream.send_upstream(message.try_into().unwrap()).await {
-                    error!("Failed to send message upstream: {:?}", e);
+            info!("Upstream sender task started.");
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        info!("Upstream sender task received shutdown signal. Exiting loop.");
+                        break;
+                    }
+                    message = upstream.channel_manager_receiver.recv() => {
+                        match message {
+                            Ok(msg) => {
+                                debug!("Received message from channel manager to send upstream.");
+                                if let Err(e) = upstream.send_upstream(msg).await {
+                                    error!("Failed to send message upstream: {:?}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Channel manager receiver channel error: {:?}. Exiting loop.", e);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-
+            upstream.channel_manager_receiver.close();
+            drop(shutdown_complete_tx);
             warn!("Upstream sender loop exited.");
         });
 

@@ -210,5 +210,6 @@ pub async fn handle_error(
         Error::InvalidMerkleRoot => {
             send_status(sender, e, error_handling::ErrorBranch::Break).await
         }
+        Error::Shutdown => send_status(sender, e, error_handling::ErrorBranch::Continue).await,
     }
 }

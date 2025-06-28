@@ -1,10 +1,21 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{sv1::downstream::Downstream, sv2::{ChannelManager, ChannelMode}, utils::proxy_extranonce_prefix_len};
+use crate::{
+    sv1::downstream::Downstream,
+    sv2::{ChannelManager, ChannelMode},
+    utils::proxy_extranonce_prefix_len,
+};
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel, common_properties::IsMiningUpstream, handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes}, mining_sv2::{
-        ExtendedExtranonce, MAX_EXTRANONCE_LEN, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget
-    }, parsers::Mining, utils::Mutex, Error as RolesLogicError
+    channels::client::extended::ExtendedChannel,
+    common_properties::IsMiningUpstream,
+    handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
+    mining_sv2::{
+        ExtendedExtranonce, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash,
+        SetTarget, MAX_EXTRANONCE_LEN,
+    },
+    parsers::Mining,
+    utils::Mutex,
+    Error as RolesLogicError,
 };
 
 use tracing::{debug, error, info, warn};
@@ -56,12 +67,17 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
             .insert(m.channel_id, Arc::new(RwLock::new(extended_channel)));
 
         if self.mode == ChannelMode::Aggregated {
-            let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(extranonce_prefix.len().into(), downstream_extranonce_len.into());
+            let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(
+                extranonce_prefix.len().into(),
+                downstream_extranonce_len.into(),
+            );
             let range_0 = 0..extranonce_prefix.len();
             let range1 = range_0.end..range_0.end + translator_proxy_extranonce_prefix_len;
             let range2 = range1.end..MAX_EXTRANONCE_LEN;
-            let extended_extranonce_factory = ExtendedExtranonce::new(range_0, range1, range2, None).unwrap();
-            self.extranonce_prefix_factory_extended = Some(Arc::new(Mutex::new(extended_extranonce_factory)));
+            let extended_extranonce_factory =
+                ExtendedExtranonce::new(range_0, range1, range2, None).unwrap();
+            self.extranonce_prefix_factory_extended =
+                Some(Arc::new(Mutex::new(extended_extranonce_factory)));
         }
 
         let m = Mining::OpenExtendedMiningChannelSuccess(m.into_static());

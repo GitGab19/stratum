@@ -105,6 +105,7 @@ pub enum Error<'a> {
     JobNotFound,
     /// Invalid merkle root during share validation
     InvalidMerkleRoot,
+    Shutdown,
 }
 
 impl fmt::Display for Error<'_> {
@@ -147,6 +148,7 @@ impl fmt::Display for Error<'_> {
             }
             JobNotFound => write!(f, "Job not found during share validation"),
             InvalidMerkleRoot => write!(f, "Invalid merkle root during share validation"),
+            Shutdown => write!(f, "Shutdown signal"),
         }
     }
 }
