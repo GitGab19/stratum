@@ -1,4 +1,6 @@
 mod args;
+use std::process;
+
 use args::Args;
 use config::TranslatorConfig;
 use error::{Error, ProxyResult};
@@ -46,4 +48,6 @@ async fn main() {
     };
 
     TranslatorSv2::new(proxy_config).start().await;
+
+    process::exit(1);
 }
