@@ -21,14 +21,14 @@ use v1::{
 };
 
 #[derive(Debug, Clone)]
-pub struct DownstreamChannelManager {
+pub struct DownstreamChannelState {
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
     sv1_server_sender: Sender<DownstreamMessages>,
     sv1_server_receiver: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
 }
 
-impl DownstreamChannelManager {
+impl DownstreamChannelState {
     fn new(
         downstream_sv1_sender: Sender<json_rpc::Message>,
         downstream_sv1_receiver: Receiver<json_rpc::Message>,
@@ -105,7 +105,7 @@ impl DownstreamData {
 #[derive(Debug, Clone)]
 pub struct Downstream {
     pub downstream_data: Arc<Mutex<DownstreamData>>,
-    downstream_channel_manager: DownstreamChannelManager,
+    downstream_channel_state: DownstreamChannelState,
 }
 
 impl Downstream {
@@ -126,7 +126,7 @@ impl Downstream {
             hashrate,
             sv1_server_sender.clone(),
         )));
-        let downstream_channel_manager = DownstreamChannelManager::new(
+        let downstream_channel_state = DownstreamChannelState::new(
             downstream_sv1_sender,
             downstream_sv1_receiver,
             sv1_server_sender,
@@ -134,7 +134,7 @@ impl Downstream {
         );
         Self {
             downstream_data,
-            downstream_channel_manager,
+            downstream_channel_state,
         }
     }
 
@@ -151,13 +151,13 @@ impl Downstream {
                         info!("Downstream: downstream receiver loop received shutdown signal. Exiting.");
                         break;
                     }
-                    message = self.downstream_channel_manager.downstream_sv1_receiver.recv() => {
+                    message = self.downstream_channel_state.downstream_sv1_receiver.recv() => {
                         match message {
                             Ok(message) => {
                                 let response = self.downstream_data.super_safe_lock(|downstream_data| downstream_data.handle_message(message));
                                 if let Ok(Some(response)) = response {
                                     if let Some(channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id) {
-                                        if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender.send(response.into()).await
+                                        if let Err(e) = self.downstream_channel_state.downstream_sv1_sender.send(response.into()).await
                                         {
                                             error!("Failed to send message to downstream: {:?}", e);
                                         }
@@ -182,7 +182,7 @@ impl Downstream {
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
         let mut sv1_server_receiver = self
-            .downstream_channel_manager
+            .downstream_channel_state
             .sv1_server_receiver
             .subscribe();
         let mut notify_shutdown = notify_shutdown.subscribe();
@@ -218,7 +218,7 @@ impl Downstream {
                                                 // If we have a pending set_difficulty, send it first
                                                 if let Some(set_difficulty_msg) = &pending_set_difficulty {
                                                     debug!("Down: Sending pending set_difficulty before notify");
-                                                    if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
+                                                    if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
                                                         .send(set_difficulty_msg.clone())
                                                         .await
                                                     {
@@ -263,7 +263,7 @@ impl Downstream {
                                                     });
 
                                                     // Send the notify to downstream
-                                                    if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
+                                                    if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
                                                         .send(notify.into())
                                                         .await
                                                     {
@@ -275,7 +275,7 @@ impl Downstream {
                                         }
 
                                         // For all other messages, send them normally
-                                        if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
+                                        if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
                                             .send(message.clone())
                                             .await
                                         {
