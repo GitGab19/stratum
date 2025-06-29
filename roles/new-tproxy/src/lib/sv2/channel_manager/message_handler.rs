@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     sv1::downstream::Downstream,
-    sv2::{ChannelManager, ChannelMode},
+    sv2::{channel_manager::channel_manager::ChannelManagerData, ChannelManager, ChannelMode},
     utils::proxy_extranonce_prefix_len,
 };
 use roles_logic_sv2::{
@@ -12,7 +12,7 @@ use roles_logic_sv2::{
 };
 
 use tracing::{debug, error, info, warn};
-impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
+impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
     fn get_channel_type(&self) -> roles_logic_sv2::handlers::mining::SupportedChannelTypes {
         SupportedChannelTypes::Extended
     }
