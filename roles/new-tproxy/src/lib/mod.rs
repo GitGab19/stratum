@@ -75,7 +75,7 @@ impl TranslatorSv2 {
 
         info!("Connecting to upstream at: {}", upstream_addr);
 
-        let mut upstream = match Upstream::new(
+        let upstream = match Upstream::new(
             upstream_addr,
             self.config.upstream_authority_pubkey,
             upstream_to_channel_manager_sender.clone(),
@@ -111,12 +111,12 @@ impl TranslatorSv2 {
             self.config.downstream_port,
         );
 
-        let mut sv1_server = Sv1Server::new(
+        let mut sv1_server = Arc::new(Sv1Server::new(
             downstream_addr,
             channel_manager_to_sv1_server_receiver,
             sv1_server_to_channel_manager_sender,
             self.config.clone(),
-        );
+        ));
 
         ChannelManager::on_upstream_message(
             channel_manager.clone(),
@@ -153,7 +153,7 @@ impl TranslatorSv2 {
         });
 
         Sv1Server::start(
-            Arc::new(sv1_server),
+            sv1_server,
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
         )
