@@ -2,7 +2,7 @@ use crate::{
     config::TranslatorConfig,
     error::ProxyResult,
     sv1::{
-        downstream::Downstream,
+        downstream::{Downstream, DownstreamData},
         translation_utils::{create_notify, get_set_difficulty},
         DownstreamMessages,
     },
@@ -43,7 +43,7 @@ pub struct Sv1Server {
     sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
     downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
     downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
-    downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+    downstreams: Arc<Mutex<HashMap<u32, Downstream>>>,
     vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
     prevhash: Arc<Mutex<Option<SetNewPrevHash<'static>>>>,
     listener_addr: SocketAddr,
@@ -159,7 +159,7 @@ impl Sv1Server {
 
                             let connection = ConnectionSV1::new(stream).await;
                             let downstream_id = self.downstream_id_factory.next();
-                            let mut downstream = Arc::new(Mutex::new(Downstream::new(
+                            let mut downstream = Downstream::new(
                                 downstream_id,
                                 connection.sender().clone(),
                                 connection.receiver().clone(),
@@ -170,7 +170,7 @@ impl Sv1Server {
                                 self.config
                                     .downstream_difficulty_config
                                     .min_individual_miner_hashrate as f32,
-                            )));
+                            );
                             self.downstreams
                                 .safe_lock(|d| d.insert(downstream_id, downstream.clone()));
                             // Insert vardiff state for this downstream
@@ -185,7 +185,7 @@ impl Sv1Server {
                             info!("Downstream {} registered successfully", downstream_id);
 
                             let channel_id = self
-                                .open_extended_mining_channel(connection, downstream.clone())
+                                .open_extended_mining_channel(connection, downstream)
                                 .await?;
                         }
                         Err(e) => {
@@ -204,7 +204,7 @@ impl Sv1Server {
         mut downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
         sv1_server_to_channel_manager_sender: Sender<Mining<'static>>,
         sequence_counter: Arc<Mutex<u32>>,
-        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        downstreams: Arc<Mutex<HashMap<u32, Downstream>>>,
         vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
         mut notify_shutdown: broadcast::Receiver<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
@@ -286,7 +286,7 @@ impl Sv1Server {
     pub async fn handle_upstream_message(
         mut channel_manager_receiver: Receiver<Mining<'static>>,
         downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
-        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        downstreams: Arc<Mutex<HashMap<u32, Downstream>>>,
         prevhash_mut: Arc<Mutex<Option<SetNewPrevHash<'static>>>>,
         clean_job_mut: Arc<Mutex<bool>>,
         first_target: Target,
@@ -309,13 +309,13 @@ impl Sv1Server {
                                     let downstream_id = m.request_id;
                                     let downstream = Self::get_downstream(downstream_id, downstreams.clone());
                                     if let Some(downstream) = downstream {
-                                        downstream.safe_lock(|d| {
+                                        downstream.downstream_data.safe_lock(|d| {
                                             d.extranonce1 = m.extranonce_prefix.to_vec();
                                             d.extranonce2_len = m.extranonce_size.into();
                                             d.channel_id = Some(m.channel_id);
                                         });
-                                        Downstream::spawn_downstream_receiver(downstream.clone(), notify_shutdown.clone(), shutdown_complete_tx.clone());
-                                        Downstream::spawn_downstream_sender(downstream.clone(), notify_shutdown.clone(), shutdown_complete_tx.clone());
+                                        downstream.clone().spawn_downstream_receiver(notify_shutdown.clone(), shutdown_complete_tx.clone());
+                                        downstream.spawn_downstream_sender(notify_shutdown.clone(), shutdown_complete_tx.clone());
                                     } else {
                                         error!("Downstream not found for downstream id: {}", downstream_id);
                                     }
@@ -368,7 +368,7 @@ impl Sv1Server {
     pub async fn open_extended_mining_channel(
         &mut self,
         connection: ConnectionSV1,
-        downstream: Arc<Mutex<Downstream>>,
+        downstream: Downstream,
     ) -> ProxyResult<'static, Option<u32>> {
         let hashrate = self
             .config
@@ -385,13 +385,15 @@ impl Sv1Server {
         });
         let user_identity = format!("{}.miner{}", self.config.user_identity, miner_number);
 
-        downstream.safe_lock(|d| {
+        downstream.downstream_data.safe_lock(|d| {
             d.user_identity = user_identity.clone();
         });
 
         // Create OpenExtendedMiningChannel message with the unique user identity
         let open_channel_msg = roles_logic_sv2::mining_sv2::OpenExtendedMiningChannel {
-            request_id: downstream.super_safe_lock(|d| d.downstream_id),
+            request_id: downstream
+                .downstream_data
+                .super_safe_lock(|d| d.downstream_id),
             user_identity: user_identity.try_into()?,
             nominal_hash_rate: hashrate as f32,
             max_target: initial_target.into(),
@@ -408,22 +410,22 @@ impl Sv1Server {
 
     pub fn get_downstream(
         downstream_id: u32,
-        downstream: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
-    ) -> Option<Arc<Mutex<Downstream>>> {
+        downstream: Arc<Mutex<HashMap<u32, Downstream>>>,
+    ) -> Option<Downstream> {
         downstream
             .safe_lock(|c| c.get(&downstream_id).cloned())
             .unwrap_or(None)
     }
 
-    pub fn get_downstream_id(downstream: Arc<Mutex<Downstream>>) -> u32 {
-        let id = downstream.safe_lock(|s| s.downstream_id);
+    pub fn get_downstream_id(downstream: Downstream) -> u32 {
+        let id = downstream.downstream_data.safe_lock(|s| s.downstream_id);
         return id.unwrap();
     }
 
     /// This method implements the SV1 server's variable difficulty logic for all downstreams.
     /// Every 60 seconds, this method updates the difficulty state for each downstream.
     async fn spawn_vardiff_loop(
-        downstreams: Arc<Mutex<HashMap<u32, Arc<Mutex<Downstream>>>>>,
+        downstreams: Arc<Mutex<HashMap<u32, Downstream>>>,
         vardiff: Arc<Mutex<HashMap<u32, Arc<RwLock<VardiffState>>>>>,
         downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
         shares_per_minute: f32,
@@ -448,8 +450,7 @@ impl Sv1Server {
                         // Get hashrate and target from downstreams
                         let (channel_id, hashrate, target) = match downstreams.safe_lock(|dmap| {
                             dmap.get(downstream_id).map(|d| {
-                                let d = d.safe_lock(|d| d.clone()).unwrap();
-                                (d.channel_id, d.hashrate, d.target.clone())
+                                d.downstream_data.super_safe_lock(|d| (d.channel_id, d.hashrate, d.target.clone()))
                             })
                         }) {
                             Ok(Some((channel_id, hashrate, target))) => (channel_id, hashrate, target),
@@ -472,7 +473,7 @@ impl Sv1Server {
                             // Update the downstream's pending target and hashrate
                             downstreams.safe_lock(|dmap| {
                                 if let Some(d) = dmap.get(downstream_id) {
-                                    d.safe_lock(|d| {
+                                    d.downstream_data.safe_lock(|d| {
                                         d.set_pending_target_and_hashrate(new_target.clone(), new_hashrate);
                                     });
                                 }
