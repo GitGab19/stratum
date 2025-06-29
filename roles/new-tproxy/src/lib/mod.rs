@@ -150,9 +150,12 @@ impl TranslatorSv2 {
             warn!("ctrl c block exited");
         });
 
-        sv1_server
-            .start(notify_shutdown.clone(), shutdown_complete_tx.clone())
-            .await;
+        Sv1Server::start(
+            Arc::new(sv1_server),
+            notify_shutdown.clone(),
+            shutdown_complete_tx.clone(),
+        )
+        .await;
 
         drop(shutdown_complete_tx);
         info!("waiting for shutdown complete...");
