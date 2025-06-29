@@ -24,7 +24,10 @@ pub type StdFrame = StandardSv2Frame<Message>;
 pub type EitherFrame = StandardEitherFrame<Message>;
 
 #[derive(Debug, Clone)]
-pub struct Upstream {
+pub struct UpstreamData;
+
+#[derive(Debug, Clone)]
+struct UpstreamChannelState {
     /// Receiver for the SV2 Upstream role
     pub upstream_receiver: Receiver<EitherFrame>,
     /// Sender for the SV2 Upstream role
@@ -33,6 +36,28 @@ pub struct Upstream {
     pub channel_manager_sender: Sender<EitherFrame>,
     /// Receiver for the ChannelManager thread
     pub channel_manager_receiver: Receiver<EitherFrame>,
+}
+
+impl UpstreamChannelState {
+    fn new(
+        channel_manager_sender: Sender<EitherFrame>,
+        channel_manager_receiver: Receiver<EitherFrame>,
+        upstream_receiver: Receiver<EitherFrame>,
+        upstream_sender: Sender<EitherFrame>,
+    ) -> Self {
+        Self {
+            channel_manager_sender,
+            channel_manager_receiver,
+            upstream_receiver,
+            upstream_sender,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Upstream {
+    upstream_channel_state: UpstreamChannelState,
+    upstream_channel_data: Arc<Mutex<UpstreamData>>,
 }
 
 impl Upstream {
@@ -76,17 +101,22 @@ impl Upstream {
                     e
                 })
                 .unwrap();
-
-        Ok(Self {
-            upstream_receiver,
-            upstream_sender,
+        let upstream_channel_state = UpstreamChannelState::new(
             channel_manager_sender,
             channel_manager_receiver,
+            upstream_receiver,
+            upstream_sender,
+        );
+        let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
+
+        Ok(Self {
+            upstream_channel_state,
+            upstream_channel_data,
         })
     }
 
     pub async fn start(
-        &mut self,
+        &self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) -> ProxyResult<'static, ()> {
@@ -115,28 +145,29 @@ impl Upstream {
     pub async fn setup_connection(&self) -> ProxyResult<'static, ()> {
         info!("Setting up SV2 connection with upstream.");
 
-        let sender = self.upstream_sender.clone();
-        let receiver = self.upstream_receiver.clone();
-
         let setup_connection = Self::get_setup_connection_message(2, 2, false)?;
         let sv2_frame: StdFrame = Message::Common(setup_connection.into()).try_into()?;
         let either_frame = sv2_frame.into();
 
         info!("Sending SetupConnection message to upstream.");
-        sender.send(either_frame).await?;
+        self.upstream_channel_state
+            .upstream_sender
+            .send(either_frame)
+            .await?;
 
-        let mut incoming: StdFrame = match receiver.recv().await {
-            Ok(frame) => {
-                debug!("Received handshake response from upstream.");
-                frame.try_into()?
-            }
-            Err(e) => {
-                error!("Failed to receive handshake response from upstream: {}", e);
-                return Err(Error::CodecNoise(
-                    codec_sv2::noise_sv2::Error::ExpectedIncomingHandshakeMessage,
-                ));
-            }
-        };
+        let mut incoming: StdFrame =
+            match self.upstream_channel_state.upstream_receiver.recv().await {
+                Ok(frame) => {
+                    debug!("Received handshake response from upstream.");
+                    frame.try_into()?
+                }
+                Err(e) => {
+                    error!("Failed to receive handshake response from upstream: {}", e);
+                    return Err(Error::CodecNoise(
+                        codec_sv2::noise_sv2::Error::ExpectedIncomingHandshakeMessage,
+                    ));
+                }
+            };
 
         let message_type = incoming
             .get_header()
@@ -148,8 +179,11 @@ impl Upstream {
 
         let payload = incoming.payload();
 
-        let self_mutex = Arc::new(Mutex::new(self.clone()));
-        ParseCommonMessagesFromUpstream::handle_message_common(self_mutex, message_type, payload)?;
+        ParseCommonMessagesFromUpstream::handle_message_common(
+            self.upstream_channel_data.clone(),
+            message_type,
+            payload,
+        )?;
 
         Ok(())
     }
@@ -167,10 +201,8 @@ impl Upstream {
 
                 match parsed_message {
                     AnyMessage::Common(_) => {
-                        // Common message - use handlers
-                        let self_mutex = Arc::new(Mutex::new(self.clone()));
                         ParseCommonMessagesFromUpstream::handle_message_common(
-                            self_mutex,
+                            self.upstream_channel_data.clone(),
                             message_type,
                             payload.as_mut_slice(),
                         )?;
@@ -178,7 +210,8 @@ impl Upstream {
                     AnyMessage::Mining(_) => {
                         // Mining message - send to channel manager
                         let either_frame = EitherFrame::Sv2(std_frame.into());
-                        self.channel_manager_sender
+                        self.upstream_channel_state
+                            .channel_manager_sender
                             .send(either_frame)
                             .await
                             .map_err(|e| {
@@ -217,7 +250,7 @@ impl Upstream {
                         info!("Upstream receiver task received shutdown signal. Exiting loop.");
                         break;
                     }
-                    message = upstream.upstream_receiver.recv() => {
+                    message = upstream.upstream_channel_state.upstream_receiver.recv() => {
                         match message {
                             Ok(msg) => {
                                 debug!("Received frame from upstream.");
@@ -233,7 +266,7 @@ impl Upstream {
                     }
                 }
             }
-            upstream.upstream_receiver.close();
+            upstream.upstream_channel_state.upstream_receiver.close();
             warn!("Upstream receiver loop exited.");
             drop(shutdown_complete_tx);
         });
@@ -259,7 +292,7 @@ impl Upstream {
                         info!("Upstream sender task received shutdown signal. Exiting loop.");
                         break;
                     }
-                    message = upstream.channel_manager_receiver.recv() => {
+                    message = upstream.upstream_channel_state.channel_manager_receiver.recv() => {
                         match message {
                             Ok(msg) => {
                                 debug!("Received message from channel manager to send upstream.");
@@ -275,7 +308,10 @@ impl Upstream {
                     }
                 }
             }
-            upstream.channel_manager_receiver.close();
+            upstream
+                .upstream_channel_state
+                .channel_manager_receiver
+                .close();
             drop(shutdown_complete_tx);
             warn!("Upstream sender loop exited.");
         });
@@ -287,7 +323,10 @@ impl Upstream {
     pub async fn send_upstream(&self, sv2_frame: EitherFrame) -> ProxyResult<'static, ()> {
         debug!("Sending message to upstream.");
         let either_frame = sv2_frame.into();
-        self.upstream_sender.send(either_frame).await?;
+        self.upstream_channel_state
+            .upstream_sender
+            .send(either_frame)
+            .await?;
         Ok(())
     }
 
