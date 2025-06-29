@@ -39,7 +39,8 @@ pub struct ChannelManager {
     // Store pending channel info by downstream_id
     pub pending_channels: HashMap<u32, (String, f32, usize)>, // (user_identity, hashrate, downstream_extranonce_len)
     pub extended_channels: HashMap<u32, Arc<RwLock<ExtendedChannel<'static>>>>,
-    pub extranonce_prefix_factory_extended: Option<Arc<Mutex<ExtendedExtranonce>>>,
+    pub upstream_extended_channel: Option<Arc<RwLock<ExtendedChannel<'static>>>>, // This is the upstream extended channel that is used in aggregated mode
+    pub extranonce_prefix_factory: Option<Arc<Mutex<ExtendedExtranonce>>>, // This is the extranonce prefix factory that is used in aggregated mode to allocate unique extranonce prefixes
 }
 
 impl ChannelManager {
@@ -58,7 +59,8 @@ impl ChannelManager {
             mode,
             pending_channels: HashMap::new(),
             extended_channels: HashMap::new(),
-            extranonce_prefix_factory_extended: None,
+            upstream_extended_channel: None,
+            extranonce_prefix_factory: None,
         }
     }
 
@@ -107,22 +109,30 @@ impl ChannelManager {
                                                     sv1_server_sender
                                                         .send(Mining::SetNewPrevHash(v.clone()))
                                                         .await;
-                                                    let active_job = self_.super_safe_lock(|c| {
-                                                        c.extended_channels
-                                                            .get(&v.channel_id)
-                                                            .and_then(|extended_channel| {
-                                                                extended_channel
-                                                                    .read()
-                                                                    .ok()
-                                                                    .and_then(|channel| {
-                                                                        channel
-                                                                            .get_active_job()
-                                                                            .map(|job| {
-                                                                                job.0.clone()
-                                                                            })
-                                                                    })
-                                                            })
-                                                    });
+                                                    let mode = self_.super_safe_lock(|c| c.mode.clone());
+                                                    let active_job = if mode == ChannelMode::Aggregated {
+                                                        self_.super_safe_lock(|c| {
+                                                            c.upstream_extended_channel.as_ref().unwrap().read().unwrap().get_active_job().map(|job| job.0.clone())
+                                                        })
+                                                    } else {
+                                                        self_.super_safe_lock(|c| {
+                                                            c.extended_channels
+                                                                .get(&v.channel_id)
+                                                                .and_then(|extended_channel| {
+                                                                    extended_channel
+                                                                        .read()
+                                                                        .ok()
+                                                                        .and_then(|channel| {
+                                                                            channel
+                                                                                .get_active_job()
+                                                                                .map(|job| {
+                                                                                    job.0.clone()
+                                                                                })
+                                                                        })
+                                                                })
+                                                        })
+                                                    };
+                                                        
                                                     if let Some(active_job) = active_job {
                                                         sv1_server_sender
                                                             .send(Mining::NewExtendedMiningJob(
@@ -180,11 +190,7 @@ impl ChannelManager {
                 });
             while let Ok(message) = sv1_server_receiver.recv().await {
                 match message {
-                    Mining::SubmitSharesExtended(m) => {
-                        info!(
-                            "ChannelManager received SubmitSharesExtended message: {:?}",
-                            m
-                        );
+                    Mining::SubmitSharesExtended(mut m) => {
                         let value = self_.super_safe_lock(|c| {
                             let extended_channel = c.extended_channels.get(&m.channel_id);
                             if let Some(extended_channel) = extended_channel {
@@ -198,39 +204,42 @@ impl ChannelManager {
                             }
                             None
                         });
-                        /*if let Some((Ok(result), share_accounting)) = value {
-                            let share_validation_success = SubmitSharesSuccess {
-                                channel_id: m.channel_id,
-                                last_sequence_number: share_accounting
-                                    .get_last_share_sequence_number(),
-                                new_shares_sum: share_accounting.get_share_work_sum(),
-                                new_submits_accepted_count: share_accounting.get_shares_accepted(),
-                            };
-                            sv1_server_sender
-                                .send(Mining::SubmitSharesSuccess(share_validation_success))
-                                .await;
-
-                            // send the share message to upstream.
-                            let share_message = Message::Mining(
-                                roles_logic_sv2::parsers::Mining::SubmitSharesExtended(m.clone()),
-                            );
-                            let frame: StdFrame = share_message.try_into().unwrap();
+                        if let Some((Ok(result), share_accounting)) = value {
+                            let mode = self_.super_safe_lock(|c| c.mode.clone());
+                            if mode == ChannelMode::Aggregated {
+                                if self_.super_safe_lock(|c| c.upstream_extended_channel.is_some()) {
+                                    let upstream_extended_channel_id = self_.super_safe_lock(|c| {
+                                        let upstream_extended_channel = c.upstream_extended_channel.as_ref().unwrap().read().unwrap();
+                                        upstream_extended_channel.get_channel_id()
+                                    });
+                                    m.channel_id = upstream_extended_channel_id; // We need to set the channel id to the upstream extended channel id
+                                    // Get the downstream channel's extranonce prefix (contains upstream prefix + translator proxy prefix)
+                                    let downstream_extranonce_prefix = self_.super_safe_lock(|c| {
+                                        c.extended_channels.get(&m.channel_id).map(|channel| {
+                                            channel.read().unwrap().get_extranonce_prefix().clone()
+                                        })
+                                    });
+                                    // Get the length of the upstream prefix (range0)
+                                    let range0_len = self_.super_safe_lock(|c| {
+                                        c.extranonce_prefix_factory.as_ref().unwrap().safe_lock(|e| {
+                                            e.get_range0_len()
+                                        }).unwrap()
+                                    });
+                                    if let Some(downstream_extranonce_prefix) = downstream_extranonce_prefix {
+                                        // Skip the upstream prefix (range0) and take the remaining bytes (translator proxy prefix)
+                                        let translator_prefix = &downstream_extranonce_prefix[range0_len..];
+                                        // Create new extranonce: translator proxy prefix + miner's extranonce
+                                        let mut new_extranonce = translator_prefix.to_vec();
+                                        new_extranonce.extend_from_slice(m.extranonce.as_ref());
+                                        // Replace the original extranonce with the modified one for upstream submission
+                                        m.extranonce = new_extranonce.try_into().unwrap();
+                                    }
+                                }
+                            }
+                            let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m)).try_into().unwrap();
                             let frame: EitherFrame = frame.into();
                             upstream_sender.send(frame).await;
-                        } else {
-                            let share_validation_error = SubmitSharesError {
-                                channel_id: m.channel_id,
-                                sequence_number: m.sequence_number,
-                                error_code: "do better match on error"
-                                    .to_string()
-                                    .try_into()
-                                    .expect("error code must be valid string"),
-                            };
-
-                            sv1_server_sender
-                                .send(Mining::SubmitSharesError(share_validation_error))
-                                .await;
-                        }*/
+                        }
                     }
                     Mining::OpenExtendedMiningChannel(m) => {
                         let mut open_channel_msg = m.clone();
@@ -239,35 +248,52 @@ impl ChannelManager {
                             .unwrap_or_else(|_| "unknown".to_string());
                         let hashrate = m.nominal_hash_rate;
                         let min_extranonce_size = m.min_extranonce_size as usize;
-                        let (mode, channels_are_empty) = self_.super_safe_lock(|c| (c.mode.clone(), c.extended_channels.is_empty()));
+                        let mode = self_.super_safe_lock(|c| c.mode.clone());
                         
                         if mode == ChannelMode::Aggregated {
-                            if !channels_are_empty {
-                                // We already have the unique channel open and so we create a new extranonce prefix 
+                            if self_.super_safe_lock(|c| c.upstream_extended_channel.is_some()) {
+                                // We already have the unique channel open and so we create a new extranonce prefix
                                 // and we send the OpenExtendedMiningChannelSuccess message directly to the sv1 server
-                                let (channel_id, target) = self_.super_safe_lock(|c| c.extended_channels.iter().next()
-                                    .map(|(id, channel)| {
-                                        let target = channel.read().unwrap().get_target().clone();
-                                        (*id, target)
-                                    })
-                                    .expect("Expected at least one extended channel in aggregated mode"));
+                                let target = self_.super_safe_lock(|c| c.upstream_extended_channel.as_ref().unwrap().read().unwrap().get_target().clone());
                                 let new_extranonce_prefix = self_.super_safe_lock(|c| {
-                                    c.extranonce_prefix_factory_extended.as_ref().unwrap().safe_lock(|e| {
+                                    c.extranonce_prefix_factory.as_ref().unwrap().safe_lock(|e| {
                                         e.next_prefix_extended(open_channel_msg.min_extranonce_size.into())
                                     }).ok().and_then(|r| r.ok())
                                 });
+                                let new_extranonce_size = self_.super_safe_lock(|c| {
+                                    c.extranonce_prefix_factory.as_ref().unwrap().safe_lock(|e| {
+                                        e.get_range2_len()
+                                    }).unwrap()
+                                });
                                 if let Some(new_extranonce_prefix) = new_extranonce_prefix {
-                                    let success_message = Mining::OpenExtendedMiningChannelSuccess(OpenExtendedMiningChannelSuccess {
-                                        request_id: open_channel_msg.request_id,
-                                        channel_id: channel_id,
-                                        target: target.clone().into(),
-                                        extranonce_size: open_channel_msg.min_extranonce_size,
-                                        extranonce_prefix: new_extranonce_prefix.clone().into(),
-                                    });
-                                    sv1_server_sender.send(success_message).await.map_err(|e| {
-                                        error!("Failed to send open channel message to upstream: {:?}", e);
-                                        e
-                                    });
+                                    if new_extranonce_size >= open_channel_msg.min_extranonce_size as usize {
+                                        let next_channel_id = self_.super_safe_lock(|c| {
+                                            c.extended_channels.keys().max().unwrap_or(&0) + 1
+                                        });
+                                        let new_downstream_extended_channel = ExtendedChannel::new(
+                                            next_channel_id,
+                                            user_identity.clone(),
+                                            new_extranonce_prefix.clone().into_b032().into_static().to_vec(),
+                                            target.clone().into(),
+                                            hashrate,
+                                            true,
+                                            new_extranonce_size as u16,
+                                        );
+                                        self_.super_safe_lock(|c| {
+                                            c.extended_channels.insert(next_channel_id, Arc::new(RwLock::new(new_downstream_extended_channel)));
+                                        });
+                                        let success_message = Mining::OpenExtendedMiningChannelSuccess(OpenExtendedMiningChannelSuccess {
+                                            request_id: open_channel_msg.request_id,
+                                            channel_id: next_channel_id,
+                                            target: target.clone().into(),
+                                            extranonce_size: new_extranonce_size as u16,
+                                            extranonce_prefix: new_extranonce_prefix.clone().into(),
+                                        });
+                                        sv1_server_sender.send(success_message).await.map_err(|e| {
+                                            error!("Failed to send open channel message to upstream: {:?}", e);
+                                            e
+                                        });
+                                    }
                                 }
                                 continue;
                             } else {
@@ -305,77 +331,4 @@ impl ChannelManager {
             }
         });
     }
-
-    /*pub async fn open_extended_mining_channel(
-        self,
-        open_channel: OpenExtendedMiningChannel<'static>,
-    ) -> Result<(), Error<'static>> {
-        info!("Opening extended mining channel in {:?}", self.mode);
-        if self.mode == ChannelMode::NonAggregated {
-            let frame = StdFrame::try_from(Message::Mining(
-                roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_channel),
-            ))
-            .unwrap();
-            self.upstream_sender.send(frame.into()).await.map_err(|e| {
-                // TODO: Handle this error
-                error!("Failed to send open channel message to upstream: {:?}", e);
-                e
-            });
-        } else {
-            if self.extended_channels.is_empty() {
-               // We need to open the unique channel which will be used by every client
-               let user_identity_str = std::str::from_utf8(open_channel.user_identity.as_ref())
-                   .map(|s| s.to_string())
-                   .unwrap_or_else(|_| "unknown".to_string());
-               // Truncate at the first dot and append .translator-proxy
-               let truncated_identity = if let Some(dot_index) = user_identity_str.find('.') {
-                   format!("{}.translator-proxy", &user_identity_str[..dot_index])
-               } else {
-                   format!("{}.translator-proxy", user_identity_str)
-               };
-               let user_identity = truncated_identity.as_bytes().to_vec();
-
-               let open_extended_mining_channel = OpenExtendedMiningChannel {
-                    request_id: 0,
-                    user_identity: user_identity.try_into()?,
-                    nominal_hash_rate: open_channel.nominal_hash_rate,
-                    min_extranonce_size: open_channel.min_extranonce_size,
-                    max_target: open_channel.max_target,
-                };
-                let frame = StdFrame::try_from(Message::Mining(
-                    roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_extended_mining_channel),
-                ))
-                .unwrap();
-                self.upstream_sender.send(frame.into()).await.map_err(|e| {
-                    error!("Failed to send open channel message to upstream: {:?}", e);
-                    e
-                });
-            } else {
-                let (channel_id, target) = self.extended_channels.iter().next()
-                    .map(|(id, channel)| {
-                        let target = channel.read().unwrap().get_target().clone();
-                        (*id, target)
-                    })
-                    .expect("Expected at least one extended channel in aggregated mode");
-                let extranonce_result = self.extranonce_prefix_factory_extended.as_ref().unwrap().safe_lock(|e| {
-                    e.next_prefix_extended(open_channel.min_extranonce_size.into())
-                });
-                if let Ok(Ok(new_extranonce_prefix)) = extranonce_result {
-                    let success_message = Mining::OpenExtendedMiningChannelSuccess(OpenExtendedMiningChannelSuccess {
-                        request_id: open_channel.request_id,
-                        channel_id: channel_id,
-                        target: target.clone().into(),
-                        extranonce_size: open_channel.min_extranonce_size,
-                        extranonce_prefix: new_extranonce_prefix.clone().into(),
-                    });
-                    self.sv1_server_sender.send(success_message).await.map_err(|e| {
-                        error!("Failed to send open channel message to upstream: {:?}", e);
-                        e
-                    });
-                }
-            }
-        }
-
-        Ok(())
-    }*/
 }
