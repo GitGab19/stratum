@@ -21,28 +21,91 @@ use v1::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Downstream {
-    pub channel_id: Option<u32>,
-    pub downstream_id: u32,
+pub struct DownstreamChannelManager {
     downstream_sv1_sender: Sender<json_rpc::Message>,
     downstream_sv1_receiver: Receiver<json_rpc::Message>,
     sv1_server_sender: Sender<DownstreamMessages>,
     sv1_server_receiver: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
+}
+
+impl DownstreamChannelManager {
+    fn new(
+        downstream_sv1_sender: Sender<json_rpc::Message>,
+        downstream_sv1_receiver: Receiver<json_rpc::Message>,
+        sv1_server_sender: Sender<DownstreamMessages>,
+        sv1_server_receiver: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
+    ) -> Self {
+        Self {
+            downstream_sv1_receiver,
+            downstream_sv1_sender,
+            sv1_server_receiver,
+            sv1_server_sender,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DownstreamData {
+    pub channel_id: Option<u32>,
+    pub downstream_id: u32,
     pub extranonce1: Vec<u8>,
     pub extranonce2_len: usize,
-    version_rolling_mask: Option<HexU32Be>,
-    version_rolling_min_bit: Option<HexU32Be>,
-    last_job_version_field: Option<u32>,
-    authorized_worker_names: Vec<String>, /* this is the list of worker names that are
-                                           * authorized to submit shares to this downstream */
-    pub user_identity: String, /* this is the user identity used by the sv1 server to open the
-                                * channel for this downstream */
-    valid_jobs: Vec<server_to_client::Notify<'static>>,
+    pub version_rolling_mask: Option<HexU32Be>,
+    pub version_rolling_min_bit: Option<HexU32Be>,
+    pub last_job_version_field: Option<u32>,
+    pub authorized_worker_names: Vec<String>,
+    pub user_identity: String,
+    pub valid_jobs: Vec<server_to_client::Notify<'static>>,
     pub target: Target,
     pub hashrate: f32,
-    pending_set_difficulty: Option<json_rpc::Message>,
-    pending_target: Option<Target>,
-    pending_hashrate: Option<f32>,
+    pub pending_set_difficulty: Option<json_rpc::Message>,
+    pub pending_target: Option<Target>,
+    pub pending_hashrate: Option<f32>,
+    pub sv1_server_sender: Sender<DownstreamMessages>, // just here for time being
+}
+
+impl DownstreamData {
+    fn new(
+        downstream_id: u32,
+        target: Target,
+        shares_per_minute: f32,
+        hashrate: f32,
+        sv1_server_sender: Sender<DownstreamMessages>,
+    ) -> Self {
+        DownstreamData {
+            channel_id: None,
+            downstream_id: downstream_id,
+            extranonce1: vec![0; 8],
+            extranonce2_len: 4,
+            version_rolling_mask: None,
+            version_rolling_min_bit: None,
+            last_job_version_field: None,
+            authorized_worker_names: Vec::new(),
+            user_identity: String::new(),
+            valid_jobs: Vec::new(),
+            target,
+            hashrate: hashrate,
+            pending_set_difficulty: None,
+            pending_target: None,
+            pending_hashrate: None,
+            sv1_server_sender,
+        }
+    }
+
+    pub fn set_pending_target_and_hashrate(&mut self, new_target: Target, new_hashrate: f32) {
+        self.pending_target = Some(new_target);
+        self.pending_hashrate = Some(new_hashrate);
+        debug!(
+            "Downstream {}: Set pending target and hashrate",
+            self.downstream_id
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Downstream {
+    pub downstream_data: Arc<Mutex<DownstreamData>>,
+    downstream_channel_manager: DownstreamChannelManager,
 }
 
 impl Downstream {
@@ -56,37 +119,30 @@ impl Downstream {
         shares_per_minute: f32,
         hashrate: f32,
     ) -> Self {
-        Self {
-            channel_id: None,
+        let downstream_data = Arc::new(Mutex::new(DownstreamData::new(
             downstream_id,
+            target,
+            shares_per_minute,
+            hashrate,
+            sv1_server_sender.clone(),
+        )));
+        let downstream_channel_manager = DownstreamChannelManager::new(
             downstream_sv1_sender,
             downstream_sv1_receiver,
             sv1_server_sender,
             sv1_server_receiver,
-            extranonce1: vec![0; 8],
-            extranonce2_len: 4,
-            version_rolling_mask: None,
-            version_rolling_min_bit: None,
-            last_job_version_field: None,
-            authorized_worker_names: Vec::new(),
-            user_identity: String::new(),
-            valid_jobs: Vec::new(),
-            target,
-            hashrate,
-            pending_set_difficulty: None,
-            pending_target: None,
-            pending_hashrate: None,
+        );
+        Self {
+            downstream_data,
+            downstream_channel_manager,
         }
     }
 
     pub fn spawn_downstream_receiver(
-        self_: Arc<Mutex<Self>>,
+        self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let mut downstream = self_.clone();
-        let downstream_sv1_receiver =
-            downstream.super_safe_lock(|d| d.downstream_sv1_receiver.clone());
         let mut notify_shutdown = notify_shutdown.subscribe();
         tokio::spawn(async move {
             loop {
@@ -95,16 +151,13 @@ impl Downstream {
                         info!("Downstream: downstream receiver loop received shutdown signal. Exiting.");
                         break;
                     }
-                    message = downstream_sv1_receiver.recv() => {
+                    message = self.downstream_channel_manager.downstream_sv1_receiver.recv() => {
                         match message {
                             Ok(message) => {
-                                let response = downstream.super_safe_lock(|d| d.handle_message(message.clone()));
+                                let response = self.downstream_data.super_safe_lock(|downstream_data| downstream_data.handle_message(message));
                                 if let Ok(Some(response)) = response {
-                                    if let Some(channel_id) = downstream.super_safe_lock(|d| d.channel_id) {
-                                        if let Err(e) = downstream
-                                            .super_safe_lock(|d| d.downstream_sv1_sender.clone())
-                                            .send(response.into())
-                                            .await
+                                    if let Some(channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id) {
+                                        if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender.send(response.into()).await
                                         {
                                             error!("Failed to send message to downstream: {:?}", e);
                                         }
@@ -118,21 +171,19 @@ impl Downstream {
                     }
                 }
             }
-            downstream_sv1_receiver.close();
             drop(shutdown_complete_tx);
             warn!("Downstream: downstream receiver loop exited.");
         });
     }
 
     pub fn spawn_downstream_sender(
-        self_: Arc<Mutex<Self>>,
+        self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let downstream = self_.clone();
-        let mut downstream = self_.clone();
-        let mut sv1_server_receiver = downstream
-            .super_safe_lock(|d| d.sv1_server_receiver.clone())
+        let mut sv1_server_receiver = self
+            .downstream_channel_manager
+            .sv1_server_receiver
             .subscribe();
         let mut notify_shutdown = notify_shutdown.subscribe();
         tokio::spawn(async move {
@@ -145,13 +196,13 @@ impl Downstream {
                     message = sv1_server_receiver.recv() => {
                         match  message {
                             Ok((channel_id, downstream_id, message)) => {
-                                if let Some(downstream_channel_id) = downstream.super_safe_lock(|d| d.channel_id) {
-                                    if downstream_channel_id == channel_id && (downstream_id.is_none() || downstream_id == Some(downstream.super_safe_lock(|d| d.downstream_id))) {
+                                if let Some(downstream_channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id) {
+                                    if downstream_channel_id == channel_id && (downstream_id.is_none() || downstream_id == Some(self.downstream_data.super_safe_lock(|d| d.downstream_id))) {
                                         // Handle set_difficulty notification
                                         if let Message::Notification(notification) = &message {
                                             if notification.method == "mining.set_difficulty" {
                                                 debug!("Down: Received set_difficulty notification, storing for next notify");
-                                                downstream.super_safe_lock(|d| {
+                                                self.downstream_data.super_safe_lock(|d| {
                                                     d.pending_set_difficulty = Some(message.clone());
                                                 });
                                                 continue; // Don't send set_difficulty immediately, wait for next notify
@@ -162,20 +213,19 @@ impl Downstream {
                                         if let Message::Notification(notification) = &message {
                                             if notification.method == "mining.notify" {
                                                 // Check if we have a pending set_difficulty
-                                                let pending_set_difficulty = downstream.super_safe_lock(|d| d.pending_set_difficulty.clone());
+                                                let pending_set_difficulty = self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty.clone());
 
                                                 // If we have a pending set_difficulty, send it first
                                                 if let Some(set_difficulty_msg) = &pending_set_difficulty {
                                                     debug!("Down: Sending pending set_difficulty before notify");
-                                                    if let Err(e) = downstream
-                                                        .super_safe_lock(|d| d.downstream_sv1_sender.clone())
+                                                    if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
                                                         .send(set_difficulty_msg.clone())
                                                         .await
                                                     {
                                                         error!("Failed to send set_difficulty to downstream: {:?}", e);
                                                     } else {
                                                         // Update target and hashrate after successful send
-                                                        downstream.super_safe_lock(|d| {
+                                                        self.downstream_data.super_safe_lock(|d| {
                                                             if let Some(new_target) = d.pending_target.take() {
                                                                 d.target = new_target;
                                                             }
@@ -186,7 +236,7 @@ impl Downstream {
                                                         });
                                                     }
                                                     // Clear the pending set_difficulty
-                                                    downstream.super_safe_lock(|d| d.pending_set_difficulty = None);
+                                                    self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty = None);
                                                 }
 
                                                 // Now handle the notify
@@ -201,7 +251,7 @@ impl Downstream {
                                                     }
 
                                                     // Update the downstream's job tracking
-                                                    downstream.super_safe_lock(|d| {
+                                                    self.downstream_data.super_safe_lock(|d| {
                                                         d.last_job_version_field = Some(notify.version.0);
                                                         if original_clean_jobs {
                                                             d.valid_jobs.clear();
@@ -213,8 +263,7 @@ impl Downstream {
                                                     });
 
                                                     // Send the notify to downstream
-                                                    if let Err(e) = downstream
-                                                        .super_safe_lock(|d| d.downstream_sv1_sender.clone())
+                                                    if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
                                                         .send(notify.into())
                                                         .await
                                                     {
@@ -226,8 +275,7 @@ impl Downstream {
                                         }
 
                                         // For all other messages, send them normally
-                                        if let Err(e) = downstream
-                                            .super_safe_lock(|d| d.downstream_sv1_sender.clone())
+                                        if let Err(e) = self.downstream_channel_manager.downstream_sv1_sender
                                             .send(message.clone())
                                             .await
                                         {
@@ -236,7 +284,7 @@ impl Downstream {
                                             // If this was a set_difficulty message, update the target and hashrate from pending values
                                             if let Message::Notification(notification) = &message {
                                                 if notification.method == "mining.set_difficulty" {
-                                                    downstream.super_safe_lock(|d| {
+                                                    self.downstream_data.super_safe_lock(|d| {
                                                         if let Some(new_target) = d.pending_target.take() {
                                                             d.target = new_target;
                                                         }
@@ -262,19 +310,10 @@ impl Downstream {
             warn!("Downstream: downstream sender loop exited");
         });
     }
-
-    pub fn set_pending_target_and_hashrate(&mut self, new_target: Target, new_hashrate: f32) {
-        self.pending_target = Some(new_target);
-        self.pending_hashrate = Some(new_hashrate);
-        debug!(
-            "Downstream {}: Set pending target and hashrate",
-            self.downstream_id
-        );
-    }
 }
 
 // Implements `IsServer` for `Downstream` to handle the SV1 messages.
-impl IsServer<'static> for Downstream {
+impl IsServer<'static> for DownstreamData {
     fn handle_configure(
         &mut self,
         request: &client_to_server::Configure,
