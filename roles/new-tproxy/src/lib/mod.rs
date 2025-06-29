@@ -92,17 +92,19 @@ impl TranslatorSv2 {
             }
         };
 
-        let channel_manager = Arc::new(Mutex::new(ChannelManager::new(
-            channel_manager_to_upstream_sender,
-            upstream_to_channel_manager_receiver,
-            channel_manager_to_sv1_server_sender.clone(),
-            sv1_server_to_channel_manager_receiver,
-            if !self.config.aggregate_channels {
-                ChannelMode::Aggregated
-            } else {
-                ChannelMode::NonAggregated
-            },
-        )));
+        let channel_manager = Arc::new(
+            (ChannelManager::new(
+                channel_manager_to_upstream_sender,
+                upstream_to_channel_manager_receiver,
+                channel_manager_to_sv1_server_sender.clone(),
+                sv1_server_to_channel_manager_receiver,
+                if !self.config.aggregate_channels {
+                    ChannelMode::Aggregated
+                } else {
+                    ChannelMode::NonAggregated
+                },
+            )),
+        );
 
         let downstream_addr: SocketAddr = SocketAddr::new(
             self.config.downstream_address.parse().unwrap(),

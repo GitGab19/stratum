@@ -32,18 +32,56 @@ pub enum ChannelMode {
     NonAggregated,
 }
 
-#[derive(Debug, Clone)]
-pub struct ChannelManager {
+#[derive(Clone, Debug)]
+pub struct ChannelState {
     upstream_sender: Sender<EitherFrame>,
     upstream_receiver: Receiver<EitherFrame>,
     sv1_server_sender: Sender<Mining<'static>>,
     sv1_server_receiver: Receiver<Mining<'static>>,
-    pub mode: ChannelMode,
+}
+
+impl ChannelState {
+    pub fn new(
+        upstream_sender: Sender<EitherFrame>,
+        upstream_receiver: Receiver<EitherFrame>,
+        sv1_server_sender: Sender<Mining<'static>>,
+        sv1_server_receiver: Receiver<Mining<'static>>,
+    ) -> Self {
+        Self {
+            upstream_sender,
+            upstream_receiver,
+            sv1_server_sender,
+            sv1_server_receiver,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelManagerData {
     // Store pending channel info by downstream_id
     pub pending_channels: HashMap<u32, (String, f32, usize)>, /* (user_identity, hashrate,
                                                                * downstream_extranonce_len) */
     pub extended_channels: HashMap<u32, Arc<RwLock<ExtendedChannel<'static>>>>,
     pub extranonce_prefix_factory_extended: Option<Arc<Mutex<ExtendedExtranonce>>>,
+
+    pub mode: ChannelMode,
+}
+
+impl ChannelManagerData {
+    fn new(mode: ChannelMode) -> Self {
+        Self {
+            pending_channels: HashMap::new(),
+            extended_channels: HashMap::new(),
+            extranonce_prefix_factory_extended: None,
+            mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelManager {
+    channel_state: ChannelState,
+    channel_manager_data: Arc<Mutex<ChannelManagerData>>,
 }
 
 impl ChannelManager {
@@ -54,30 +92,24 @@ impl ChannelManager {
         sv1_server_receiver: Receiver<Mining<'static>>,
         mode: ChannelMode,
     ) -> Self {
-        Self {
+        let channel_state = ChannelState::new(
             upstream_sender,
             upstream_receiver,
             sv1_server_sender,
             sv1_server_receiver,
-            mode,
-            pending_channels: HashMap::new(),
-            extended_channels: HashMap::new(),
-            extranonce_prefix_factory_extended: None,
+        );
+        let channel_manager_data = Arc::new(Mutex::new(ChannelManagerData::new(mode)));
+        Self {
+            channel_state,
+            channel_manager_data,
         }
     }
 
     pub async fn on_upstream_message(
-        self_: Arc<Mutex<Self>>,
+        self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let (upstream_receiver, upstream_sender, sv1_server_sender) = self_.super_safe_lock(|e| {
-            (
-                e.upstream_receiver.clone(),
-                e.upstream_sender.clone(),
-                e.sv1_server_sender.clone(),
-            )
-        });
         let mut notify_shutdown = notify_shutdown.subscribe();
         tokio::spawn(async move {
             loop {
@@ -86,7 +118,7 @@ impl ChannelManager {
                         info!("Channel Manager:Upstream Message task received shutdown signal. Exiting loop.");
                         break;
                     }
-                    message = upstream_receiver.recv() => {
+                    message = self.channel_state.upstream_receiver.recv() => {
                         match message {
                             Ok(message) => {
                                 if let Frame::Sv2(mut frame) = message {
@@ -103,7 +135,7 @@ impl ChannelManager {
                                             Message::Mining(mining_message) => {
                                                 let message =
                                                     ParseMiningMessagesFromUpstream::handle_message_mining(
-                                                        self_.clone(),
+                                                        self.channel_manager_data.clone(),
                                                         message_type,
                                                         payload.as_mut_slice(),
                                                     );
@@ -114,16 +146,16 @@ impl ChannelManager {
 
                                                             let frame: StdFrame = message.try_into().unwrap();
                                                             let frame: EitherFrame = frame.into();
-                                                            upstream_sender.send(frame).await;
+                                                            self.channel_state.upstream_sender.send(frame).await;
                                                         }
                                                         SendTo::None(Some(m)) => {
                                                             match m {
                                                                 // Implemented message handlers
                                                                 Mining::SetNewPrevHash(v) => {
-                                                                    sv1_server_sender
+                                                                    self.channel_state.sv1_server_sender
                                                                         .send(Mining::SetNewPrevHash(v.clone()))
                                                                         .await;
-                                                                    let active_job = self_.super_safe_lock(|c| {
+                                                                    let active_job = self.channel_manager_data.super_safe_lock(|c| {
                                                                         c.extended_channels
                                                                             .get(&v.channel_id)
                                                                             .and_then(|extended_channel| {
@@ -140,7 +172,7 @@ impl ChannelManager {
                                                                             })
                                                                     });
                                                                     if let Some(active_job) = active_job {
-                                                                        sv1_server_sender
+                                                                        self.channel_state.sv1_server_sender
                                                                             .send(Mining::NewExtendedMiningJob(
                                                                                 active_job,
                                                                             ))
@@ -153,14 +185,14 @@ impl ChannelManager {
                                                                                   // in this case and we don't send
                                                                                   // anything to sv1 server
                                                                     }
-                                                                    sv1_server_sender
+                                                                    self.channel_state.sv1_server_sender
                                                                         .send(Mining::NewExtendedMiningJob(
                                                                             v.clone(),
                                                                         ))
                                                                         .await;
                                                                 }
                                                                 Mining::OpenExtendedMiningChannelSuccess(v) => {
-                                                                    sv1_server_sender.send(Mining::OpenExtendedMiningChannelSuccess(v.clone())).await;
+                                                                    self.channel_state.sv1_server_sender.send(Mining::OpenExtendedMiningChannelSuccess(v.clone())).await;
                                                                 }
 
                                                                 // TODO: Implement these handlers
@@ -188,27 +220,19 @@ impl ChannelManager {
                     }
                 }
             }
-            upstream_receiver.close();
-            upstream_sender.close();
-            sv1_server_sender.close();
+            self.channel_state.upstream_receiver.close();
+            self.channel_state.upstream_sender.close();
+            self.channel_state.sv1_server_sender.close();
             drop(shutdown_complete_tx);
             warn!("Channel Manager:Upstream Message task loop exited.");
         });
     }
 
     pub async fn on_downstream_message(
-        self_: Arc<Mutex<Self>>,
+        self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let (sv1_server_receiver, sv1_server_sender, upstream_sender) =
-            self_.super_safe_lock(|e| {
-                (
-                    e.sv1_server_receiver.clone(),
-                    e.sv1_server_sender.clone(),
-                    e.upstream_sender.clone(),
-                )
-            });
         let mut notify_shutdown = notify_shutdown.subscribe();
         tokio::spawn(async move {
             loop {
@@ -217,7 +241,7 @@ impl ChannelManager {
                         info!("Channel Manager:Downstream Message task received shutdown signal. Exiting loop.");
                         break;
                     }
-                    message = sv1_server_receiver.recv() => {
+                    message = self.channel_state.sv1_server_receiver.recv() => {
                         match message {
                             Ok(message) => {
                                 match message {
@@ -226,7 +250,7 @@ impl ChannelManager {
                                             "ChannelManager received SubmitSharesExtended message: {:?}",
                                             m
                                         );
-                                        let value = self_.super_safe_lock(|c| {
+                                        let value = self.channel_manager_data.super_safe_lock(|c| {
                                             let extended_channel = c.extended_channels.get(&m.channel_id);
                                             if let Some(extended_channel) = extended_channel {
                                                 let channel = extended_channel.write();
@@ -280,7 +304,7 @@ impl ChannelManager {
                                             .unwrap_or_else(|_| "unknown".to_string());
                                         let hashrate = m.nominal_hash_rate;
                                         let min_extranonce_size = m.min_extranonce_size as usize;
-                                        let (mode, channels_are_empty) = self_
+                                        let (mode, channels_are_empty) = self.channel_manager_data
                                             .super_safe_lock(|c| (c.mode.clone(), c.extended_channels.is_empty()));
 
                                         if mode == ChannelMode::Aggregated {
@@ -289,13 +313,13 @@ impl ChannelManager {
                                                 // extranonce prefix and we send the
                                                 // OpenExtendedMiningChannelSuccess message directly to the sv1
                                                 // server
-                                                let (channel_id, target) = self_.super_safe_lock(|c| c.extended_channels.iter().next()
+                                                let (channel_id, target) = self.channel_manager_data.super_safe_lock(|c| c.extended_channels.iter().next()
                                                     .map(|(id, channel)| {
                                                         let target = channel.read().unwrap().get_target().clone();
                                                         (*id, target)
                                                     })
                                                     .expect("Expected at least one extended channel in aggregated mode"));
-                                                let new_extranonce_prefix = self_.super_safe_lock(|c| {
+                                                let new_extranonce_prefix = self.channel_manager_data.super_safe_lock(|c| {
                                                     c.extranonce_prefix_factory_extended
                                                         .as_ref()
                                                         .unwrap()
@@ -317,7 +341,7 @@ impl ChannelManager {
                                                             extranonce_prefix: new_extranonce_prefix.clone().into(),
                                                         },
                                                     );
-                                                    sv1_server_sender.send(success_message).await.map_err(|e| {
+                                                    self.channel_state.sv1_server_sender.send(success_message).await.map_err(|e| {
                                                         error!(
                                                             "Failed to send open channel message to upstream: {:?}",
                                                             e
@@ -345,7 +369,7 @@ impl ChannelManager {
                                         }
 
                                         // Store the user identity and hashrate
-                                        self_.super_safe_lock(|c| {
+                                        self.channel_manager_data.super_safe_lock(|c| {
                                             c.pending_channels.insert(
                                                 open_channel_msg.request_id,
                                                 (user_identity, hashrate, min_extranonce_size),
@@ -359,7 +383,7 @@ impl ChannelManager {
                                         ))
                                         .unwrap();
 
-                                        upstream_sender.send(frame.into()).await.map_err(|e| {
+                                        self.channel_state.upstream_sender.send(frame.into()).await.map_err(|e| {
                                             error!("Failed to send open channel message to upstream: {:?}", e);
                                             e
                                         });
@@ -374,9 +398,9 @@ impl ChannelManager {
                     }
                 }
             }
-            sv1_server_receiver.close();
-            sv1_server_sender.close();
-            upstream_sender.close();
+            self.channel_state.sv1_server_receiver.close();
+            self.channel_state.sv1_server_sender.close();
+            self.channel_state.upstream_sender.close();
             drop(shutdown_complete_tx);
             warn!("Channel Manager:Downstream Message task exited loop.");
         });
