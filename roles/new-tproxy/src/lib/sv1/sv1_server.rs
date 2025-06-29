@@ -288,9 +288,7 @@ impl Sv1Server {
         self.sv1_server_channel_state
             .downstream_to_sv1_server_receiver
             .close();
-        self.sv1_server_channel_state
-            .channel_manager_sender
-            .close();
+        self.sv1_server_channel_state.channel_manager_sender.close();
         drop(shutdown_complete_tx);
         warn!("SV1 Server: Downstream message handler exited.");
         Ok(())
