@@ -40,7 +40,7 @@ use v1::{
     IsServer,
 };
 
-struct Sv1ServerChannelManager {
+struct Sv1ServerChannelState {
     sv1_server_to_downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
     sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
     downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
@@ -49,7 +49,7 @@ struct Sv1ServerChannelManager {
     channel_manager_sender: Sender<Mining<'static>>,
 }
 
-impl Sv1ServerChannelManager {
+impl Sv1ServerChannelState {
     fn new(
         channel_manager_receiver: Receiver<Mining<'static>>,
         channel_manager_sender: Sender<Mining<'static>>,
@@ -89,7 +89,7 @@ impl Sv1ServerData {
 }
 
 pub struct Sv1Server {
-    sv1_server_channel_manager: Sv1ServerChannelManager,
+    sv1_server_channel_state: Sv1ServerChannelState,
     sv1_server_data: Arc<Mutex<Sv1ServerData>>,
     shares_per_minute: f32,
     listener_addr: SocketAddr,
@@ -107,11 +107,11 @@ impl Sv1Server {
         config: TranslatorConfig,
     ) -> Self {
         let shares_per_minute = config.downstream_difficulty_config.shares_per_minute as f32;
-        let sv1_server_channel_manager =
-            Sv1ServerChannelManager::new(channel_manager_receiver, channel_manager_sender);
+        let sv1_server_channel_state =
+            Sv1ServerChannelState::new(channel_manager_receiver, channel_manager_sender);
         let sv1_server_data = Arc::new(Mutex::new(Sv1ServerData::new()));
         Self {
-            sv1_server_channel_manager,
+            sv1_server_channel_state,
             sv1_server_data,
             config,
             listener_addr,
@@ -182,8 +182,8 @@ impl Sv1Server {
                                 downstream_id,
                                 connection.sender().clone(),
                                 connection.receiver().clone(),
-                                self.sv1_server_channel_manager.downstream_to_sv1_server_sender.clone(),
-                                self.sv1_server_channel_manager.sv1_server_to_downstream_sender.clone(),
+                                self.sv1_server_channel_state.downstream_to_sv1_server_sender.clone(),
+                                self.sv1_server_channel_state.sv1_server_to_downstream_sender.clone(),
                                 first_target.clone(),
                                 self.shares_per_minute,
                                 self.config
@@ -228,7 +228,7 @@ impl Sv1Server {
                     info!("SV1 Server: Downstream message handler received shutdown signal. Exiting");
                     break;
                 }
-                downstream_message_result = self.sv1_server_channel_manager.downstream_to_sv1_server_receiver.recv() => {
+                downstream_message_result = self.sv1_server_channel_state.downstream_to_sv1_server_receiver.recv() => {
                     match downstream_message_result {
                         Ok(downstream_message) => {
                             match downstream_message {
@@ -270,7 +270,7 @@ impl Sv1Server {
                                         extranonce: extranonce.try_into()?,
                                     };
                                     // send message to channel manager for validation with channel target
-                                    self.sv1_server_channel_manager.channel_manager_sender
+                                    self.sv1_server_channel_state.channel_manager_sender
                                         .send(Mining::SubmitSharesExtended(submit_share_extended))
                                         .await;
                                     self.sequence_counter.fetch_add(1, Ordering::SeqCst);
@@ -285,10 +285,10 @@ impl Sv1Server {
                 }
             }
         }
-        self.sv1_server_channel_manager
+        self.sv1_server_channel_state
             .downstream_to_sv1_server_receiver
             .close();
-        self.sv1_server_channel_manager
+        self.sv1_server_channel_state
             .channel_manager_sender
             .close();
         drop(shutdown_complete_tx);
@@ -310,7 +310,7 @@ impl Sv1Server {
                     info!("SV1 Server: Upstream message handler received shutdown signal. Exiting.");
                     break;
                 }
-                message_result = self.sv1_server_channel_manager.channel_manager_receiver.recv() => {
+                message_result = self.sv1_server_channel_state.channel_manager_receiver.recv() => {
                     match message_result {
                         Ok(message) => {
                             match message {
@@ -334,13 +334,13 @@ impl Sv1Server {
                                     // if it's the first job, send the set difficulty
                                     if m.job_id == 1 {
                                         let set_difficulty = get_set_difficulty(first_target.clone()).unwrap();
-                                        self.sv1_server_channel_manager.sv1_server_to_downstream_sender.send((m.channel_id, None, set_difficulty.into()));
+                                        self.sv1_server_channel_state.sv1_server_to_downstream_sender.send((m.channel_id, None, set_difficulty.into()));
                                     }
                                     let prevhash = self.sv1_server_data.super_safe_lock(|x| x.prevhash.clone());
                                     if let Some(prevhash) = prevhash {
                                         let notify = create_notify(prevhash, m.clone().into_static(), self.clean_job.load(Ordering::SeqCst));
                                         self.clean_job.store(false, Ordering::SeqCst);
-                                        let _ = self.sv1_server_channel_manager.sv1_server_to_downstream_sender.send((m.channel_id, None, notify.into()));
+                                        let _ = self.sv1_server_channel_state.sv1_server_to_downstream_sender.send((m.channel_id, None, notify.into()));
                                     }
                                 }
                                 Mining::SetNewPrevHash(m) => {
@@ -368,7 +368,7 @@ impl Sv1Server {
 
             }
         }
-        self.sv1_server_channel_manager
+        self.sv1_server_channel_state
             .channel_manager_receiver
             .close();
         drop(shutdown_complete_tx);
@@ -413,7 +413,7 @@ impl Sv1Server {
         };
 
         let open_upstream_channel = self
-            .sv1_server_channel_manager
+            .sv1_server_channel_state
             .channel_manager_sender
             .send(Mining::OpenExtendedMiningChannel(open_channel_msg))
             .await;
@@ -499,7 +499,7 @@ impl Sv1Server {
                     for (channel_id, downstream_id, target) in updates {
                         if let Ok(set_difficulty_msg) = get_set_difficulty(target) {
                             if let Err(e) =
-                                self.sv1_server_channel_manager.sv1_server_to_downstream_sender.send((channel_id, downstream_id, set_difficulty_msg))
+                                self.sv1_server_channel_state.sv1_server_to_downstream_sender.send((channel_id, downstream_id, set_difficulty_msg))
                             {
                                 error!(
                                     "Failed to send SetDifficulty message to downstream {}: {:?}",
