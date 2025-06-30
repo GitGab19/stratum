@@ -1,7 +1,6 @@
 use crate::{
     config::TranslatorConfig,
     error::{Error, ProxyResult},
-    sv1::downstream::Downstream,
     sv2::upstream::upstream::{EitherFrame, Message, StdFrame},
     utils::into_static,
 };
