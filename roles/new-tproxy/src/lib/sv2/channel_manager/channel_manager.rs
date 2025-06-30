@@ -106,44 +106,62 @@ impl ChannelManager {
         }
     }
 
-    pub async fn on_upstream_message(
+    pub async fn run_channel_manager_tasks(
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let mut notify_shutdown = notify_shutdown.subscribe();
+        let mut shutdown_rx = notify_shutdown.subscribe();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = notify_shutdown.recv() => {
-                        info!("Channel Manager:Upstream Message task received shutdown signal. Exiting loop.");
+                    _ = shutdown_rx.recv() => {
+                        info!("ChannelManager: received shutdown signal.");
                         break;
                     }
-                    message = self.channel_state.upstream_receiver.recv() => {
+                    Some(_) = Self::handle_upstream_message(self.clone()) => {},
+                    Some(_) = Self::handle_downstream_message(self.clone()) => {},
+                    else => {
+                        warn!("All channel manager message streams closed. Exiting...");
+                        break;
+                    }
+                }
+            }
+
+            self.channel_state.upstream_receiver.close();
+            self.channel_state.upstream_sender.close();
+            self.channel_state.sv1_server_receiver.close();
+            self.channel_state.sv1_server_sender.close();
+            drop(shutdown_complete_tx);
+            warn!("ChannelManager: unified message loop exited.");
+        });
+    }
+
+    pub async fn handle_upstream_message(self: Arc<Self>) -> Option<()> {
+        match self.channel_state.upstream_receiver.recv().await {
+            Ok(message) => {
+                if let Frame::Sv2(mut frame) = message {
+                    if let Some(header) = frame.get_header() {
+                        let message_type = header.msg_type();
+
+                        let mut payload = frame.payload().to_vec();
+                        // let mut payload1 = payload.clone();
+                        let message: AnyMessage<'_> =
+                            into_static((message_type, payload.as_mut_slice()).try_into().unwrap())
+                                .unwrap();
+
                         match message {
-                            Ok(message) => {
-                                if let Frame::Sv2(mut frame) = message {
-                                    if let Some(header) = frame.get_header() {
-                                        let message_type = header.msg_type();
-
-                                        let mut payload = frame.payload().to_vec();
-                                        // let mut payload1 = payload.clone();
-                                        let message: AnyMessage<'_> =
-                                            into_static((message_type, payload.as_mut_slice()).try_into().unwrap())
-                                                .unwrap();
-
-                                        match message {
-                                            Message::Mining(mining_message) => {
-                                                let message =
-                                                    ParseMiningMessagesFromUpstream::handle_message_mining(
-                                                        self.channel_manager_data.clone(),
-                                                        message_type,
-                                                        payload.as_mut_slice(),
-                                                    );
-                                                if let Ok(message) = message {
-                                                    match message {
-                                                        SendTo::Respond(message_for_upstream) => {
-                                                            let message = Message::Mining(message_for_upstream);
+                            Message::Mining(mining_message) => {
+                                let message =
+                                    ParseMiningMessagesFromUpstream::handle_message_mining(
+                                        self.channel_manager_data.clone(),
+                                        message_type,
+                                        payload.as_mut_slice(),
+                                    );
+                                if let Ok(message) = message {
+                                    match message {
+                                        SendTo::Respond(message_for_upstream) => {
+                                            let message = Message::Mining(message_for_upstream);
 
                                                             let frame: StdFrame = message.try_into().unwrap();
                                                             let frame: EitherFrame = frame.into();
@@ -204,37 +222,27 @@ impl ChannelManager {
                                                                     self.channel_state.sv1_server_sender.send(Mining::OpenExtendedMiningChannelSuccess(v.clone())).await;
                                                                 }
 
-                                                                // TODO: Implement these handlers
-                                                                Mining::OpenMiningChannelError(_) => todo!(),
-                                                                // Unreachable - not supported in this
-                                                                // implementation
-                                                                _ => unreachable!(),
-                                                            }
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                            }
-                                            _ => {
-                                                warn!("Received unknown message type from upstream: {:?}", message);
+                                                // TODO: Implement these handlers
+                                                Mining::OpenMiningChannelError(_) => todo!(),
+                                                // Unreachable - not supported in this
+                                                // implementation
+                                                _ => unreachable!(),
                                             }
                                         }
+                                        _ => {}
                                     }
                                 }
                             }
-                            Err(e) => {
-                                break;
+                            _ => {
+                                warn!("Received unknown message type from upstream: {:?}", message);
                             }
                         }
                     }
                 }
+                Some(())
             }
-            self.channel_state.upstream_receiver.close();
-            self.channel_state.upstream_sender.close();
-            self.channel_state.sv1_server_sender.close();
-            drop(shutdown_complete_tx);
-            warn!("Channel Manager:Upstream Message task loop exited.");
-        });
+            Err(e) => None,
+        }
     }
 
     pub async fn on_downstream_message(self_: Arc<Mutex<Self>>) {
@@ -369,41 +377,35 @@ impl ChannelManager {
                             }
                         }
 
-                                        // Store the user identity and hashrate
-                                        self.channel_manager_data.super_safe_lock(|c| {
-                                            c.pending_channels.insert(
-                                                open_channel_msg.request_id,
-                                                (user_identity, hashrate, min_extranonce_size),
-                                            );
-                                        });
+                        // Store the user identity and hashrate
+                        self.channel_manager_data.super_safe_lock(|c| {
+                            c.pending_channels.insert(
+                                open_channel_msg.request_id,
+                                (user_identity, hashrate, min_extranonce_size),
+                            );
+                        });
 
-                                        let frame = StdFrame::try_from(Message::Mining(
-                                            roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(
-                                                open_channel_msg,
-                                            ),
-                                        ))
-                                        .unwrap();
+                        let frame = StdFrame::try_from(Message::Mining(
+                            roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(
+                                open_channel_msg,
+                            ),
+                        ))
+                        .unwrap();
 
-                                        self.channel_state.upstream_sender.send(frame.into()).await.map_err(|e| {
-                                            error!("Failed to send open channel message to upstream: {:?}", e);
-                                            e
-                                        });
-                                    }
-                                    _ => {}
-                                }
-                            },
-                            Err(e) => {
-                                break;
-                            }
-                        }
+                        self.channel_state
+                            .upstream_sender
+                            .send(frame.into())
+                            .await
+                            .map_err(|e| {
+                                error!("Failed to send open channel message to upstream: {:?}", e);
+                                e
+                            });
                     }
+                    _ => {}
                 }
+                Some(())
             }
-            self.channel_state.sv1_server_receiver.close();
-            self.channel_state.sv1_server_sender.close();
-            self.channel_state.upstream_sender.close();
-            drop(shutdown_complete_tx);
-            warn!("Channel Manager:Downstream Message task exited loop.");
-        });
+            Err(e) => None,
+        }
     }
 }

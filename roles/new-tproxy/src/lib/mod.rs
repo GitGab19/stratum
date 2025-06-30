@@ -118,14 +118,8 @@ impl TranslatorSv2 {
             self.config.clone(),
         ));
 
-        ChannelManager::on_upstream_message(
+        ChannelManager::run_channel_manager_tasks(
             channel_manager.clone(),
-            notify_shutdown.clone(),
-            shutdown_complete_tx.clone(),
-        )
-        .await;
-        ChannelManager::on_downstream_message(
-            channel_manager,
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
         )
