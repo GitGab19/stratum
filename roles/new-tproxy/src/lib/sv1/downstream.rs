@@ -138,177 +138,212 @@ impl Downstream {
         }
     }
 
-    pub fn spawn_downstream_receiver(
-        self,
+    pub fn run_downstream_tasks(
+        self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
-        let mut notify_shutdown = notify_shutdown.subscribe();
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        info!("Spawning downstream tasks");
         tokio::spawn(async move {
             loop {
+                let mut sv1_server_receiver = self
+                    .downstream_channel_state
+                    .sv1_server_receiver
+                    .subscribe();
                 tokio::select! {
-                    _ = notify_shutdown.recv() => {
-                        info!("Downstream: downstream receiver loop received shutdown signal. Exiting.");
+                    _ = shutdown_rx.recv() => {
+                        info!("Downstream: received shutdown signal");
                         break;
                     }
-                    message = self.downstream_channel_state.downstream_sv1_receiver.recv() => {
-                        match message {
-                            Ok(message) => {
-                                let response = self.downstream_data.super_safe_lock(|downstream_data| downstream_data.handle_message(message));
-                                if let Ok(Some(response)) = response {
-                                    if let Some(channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id) {
-                                        if let Err(e) = self.downstream_channel_state.downstream_sv1_sender.send(response.into()).await
-                                        {
-                                            error!("Failed to send message to downstream: {:?}", e);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                break;
-                            }
-                        }
+                    Some(_) = Self::handle_downstream_message(self.clone()) => {},
+                    Some(_) = Self::handle_sv1_server_message(self.clone(), sv1_server_receiver) => {},
+                    else => {
+                        warn!("Downstream: all channels closed, exiting loop");
+                        break;
                     }
                 }
             }
+
             drop(shutdown_complete_tx);
-            warn!("Downstream: downstream receiver loop exited.");
+            warn!("Downstream: unified task exited");
         });
     }
 
-    pub fn spawn_downstream_sender(
-        self,
-        notify_shutdown: broadcast::Sender<()>,
-        shutdown_complete_tx: mpsc::Sender<()>,
-    ) {
-        let mut sv1_server_receiver = self
-            .downstream_channel_state
-            .sv1_server_receiver
-            .subscribe();
-        let mut notify_shutdown = notify_shutdown.subscribe();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = notify_shutdown.recv() => {
-                        info!("Downstream: downstream sender loop received shutdown signal. Exiting.");
-                        break;
-                    }
-                    message = sv1_server_receiver.recv() => {
-                        match  message {
-                            Ok((channel_id, downstream_id, message)) => {
-                                if let Some(downstream_channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id) {
-                                    if downstream_channel_id == channel_id && (downstream_id.is_none() || downstream_id == Some(self.downstream_data.super_safe_lock(|d| d.downstream_id))) {
-                                        // Handle set_difficulty notification
-                                        if let Message::Notification(notification) = &message {
-                                            if notification.method == "mining.set_difficulty" {
-                                                debug!("Down: Received set_difficulty notification, storing for next notify");
-                                                self.downstream_data.super_safe_lock(|d| {
-                                                    d.pending_set_difficulty = Some(message.clone());
-                                                });
-                                                continue; // Don't send set_difficulty immediately, wait for next notify
+    pub async fn handle_sv1_server_message(
+        self: Arc<Self>,
+        mut sv1_server_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>,
+    ) -> Option<()> {
+        match sv1_server_receiver.recv().await {
+            Ok((channel_id, downstream_id, message)) => {
+                if let Some(downstream_channel_id) =
+                    self.downstream_data.super_safe_lock(|d| d.channel_id)
+                {
+                    if downstream_channel_id == channel_id
+                        && (downstream_id.is_none()
+                            || downstream_id
+                                == Some(self.downstream_data.super_safe_lock(|d| d.downstream_id)))
+                    {
+                        // Handle set_difficulty notification
+                        if let Message::Notification(notification) = &message {
+                            if notification.method == "mining.set_difficulty" {
+                                debug!("Down: Received set_difficulty notification, storing for next notify");
+                                self.downstream_data.super_safe_lock(|d| {
+                                    d.pending_set_difficulty = Some(message.clone());
+                                });
+                                return Some(()); // Don't send set_difficulty immediately, wait for
+                                                 // next notify
+                            }
+                        }
+
+                        // Handle notify notification
+                        if let Message::Notification(notification) = &message {
+                            if notification.method == "mining.notify" {
+                                // Check if we have a pending set_difficulty
+                                let pending_set_difficulty = self
+                                    .downstream_data
+                                    .super_safe_lock(|d| d.pending_set_difficulty.clone());
+
+                                // If we have a pending set_difficulty, send it first
+                                if let Some(set_difficulty_msg) = &pending_set_difficulty {
+                                    debug!("Down: Sending pending set_difficulty before notify");
+                                    if let Err(e) = self
+                                        .downstream_channel_state
+                                        .downstream_sv1_sender
+                                        .send(set_difficulty_msg.clone())
+                                        .await
+                                    {
+                                        error!(
+                                            "Failed to send set_difficulty to downstream: {:?}",
+                                            e
+                                        );
+                                    } else {
+                                        // Update target and hashrate after successful send
+                                        self.downstream_data.super_safe_lock(|d| {
+                                            if let Some(new_target) = d.pending_target.take() {
+                                                d.target = new_target;
                                             }
-                                        }
-
-                                        // Handle notify notification
-                                        if let Message::Notification(notification) = &message {
-                                            if notification.method == "mining.notify" {
-                                                // Check if we have a pending set_difficulty
-                                                let pending_set_difficulty = self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty.clone());
-
-                                                // If we have a pending set_difficulty, send it first
-                                                if let Some(set_difficulty_msg) = &pending_set_difficulty {
-                                                    debug!("Down: Sending pending set_difficulty before notify");
-                                                    if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
-                                                        .send(set_difficulty_msg.clone())
-                                                        .await
-                                                    {
-                                                        error!("Failed to send set_difficulty to downstream: {:?}", e);
-                                                    } else {
-                                                        // Update target and hashrate after successful send
-                                                        self.downstream_data.super_safe_lock(|d| {
-                                                            if let Some(new_target) = d.pending_target.take() {
-                                                                d.target = new_target;
-                                                            }
-                                                            if let Some(new_hashrate) = d.pending_hashrate.take() {
-                                                                d.hashrate = new_hashrate;
-                                                            }
-                                                            debug!("Downstream {}: Updated target and hashrate after sending set_difficulty", d.downstream_id);
-                                                        });
-                                                    }
-                                                    // Clear the pending set_difficulty
-                                                    self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty = None);
-                                                }
-
-                                                // Now handle the notify
-                                                if let Ok(mut notify) = server_to_client::Notify::try_from(notification.clone()) {
-                                                    // Check the original clean_jobs value before modifying it
-                                                    let original_clean_jobs = notify.clean_jobs;
-
-                                                    // Set clean_jobs to true if we had a pending set_difficulty
-                                                    if pending_set_difficulty.is_some() {
-                                                        notify.clean_jobs = true;
-                                                        debug!("Down: Sending notify with clean_jobs=true after set_difficulty");
-                                                    }
-
-                                                    // Update the downstream's job tracking
-                                                    self.downstream_data.super_safe_lock(|d| {
-                                                        d.last_job_version_field = Some(notify.version.0);
-                                                        if original_clean_jobs {
-                                                            d.valid_jobs.clear();
-                                                            d.valid_jobs.push(notify.clone());
-                                                        } else {
-                                                            d.valid_jobs.push(notify.clone());
-                                                        }
-                                                        debug!("Updated valid jobs: {:?}", d.valid_jobs);
-                                                    });
-
-                                                    // Send the notify to downstream
-                                                    if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
-                                                        .send(notify.into())
-                                                        .await
-                                                    {
-                                                        error!("Failed to send notify to downstream: {:?}", e);
-                                                    }
-                                                }
-                                                continue; // We've handled the notify specially, don't send it again below
+                                            if let Some(new_hashrate) = d.pending_hashrate.take() {
+                                                d.hashrate = new_hashrate;
                                             }
-                                        }
+                                            debug!("Downstream {}: Updated target and hashrate after sending set_difficulty", d.downstream_id);
+                                        });
+                                    }
+                                    // Clear the pending set_difficulty
+                                    self.downstream_data
+                                        .super_safe_lock(|d| d.pending_set_difficulty = None);
+                                }
 
-                                        // For all other messages, send them normally
-                                        if let Err(e) = self.downstream_channel_state.downstream_sv1_sender
-                                            .send(message.clone())
-                                            .await
-                                        {
-                                            error!("Failed to send message to downstream: {:?}", e);
+                                // Now handle the notify
+                                if let Ok(mut notify) =
+                                    server_to_client::Notify::try_from(notification.clone())
+                                {
+                                    // Check the original clean_jobs value before modifying it
+                                    let original_clean_jobs = notify.clean_jobs;
+
+                                    // Set clean_jobs to true if we had a pending set_difficulty
+                                    if pending_set_difficulty.is_some() {
+                                        notify.clean_jobs = true;
+                                        debug!("Down: Sending notify with clean_jobs=true after set_difficulty");
+                                    }
+
+                                    // Update the downstream's job tracking
+                                    self.downstream_data.super_safe_lock(|d| {
+                                        d.last_job_version_field = Some(notify.version.0);
+                                        if original_clean_jobs {
+                                            d.valid_jobs.clear();
+                                            d.valid_jobs.push(notify.clone());
                                         } else {
-                                            // If this was a set_difficulty message, update the target and hashrate from pending values
-                                            if let Message::Notification(notification) = &message {
-                                                if notification.method == "mining.set_difficulty" {
-                                                    self.downstream_data.super_safe_lock(|d| {
-                                                        if let Some(new_target) = d.pending_target.take() {
-                                                            d.target = new_target;
-                                                        }
-                                                        if let Some(new_hashrate) = d.pending_hashrate.take() {
-                                                            d.hashrate = new_hashrate;
-                                                        }
-                                                        debug!("Downstream {}: Updated target and hashrate after sending direct set_difficulty", d.downstream_id);
-                                                    });
-                                                }
-                                            }
+                                            d.valid_jobs.push(notify.clone());
                                         }
+                                        debug!("Updated valid jobs: {:?}", d.valid_jobs);
+                                    });
+
+                                    // Send the notify to downstream
+                                    if let Err(e) = self
+                                        .downstream_channel_state
+                                        .downstream_sv1_sender
+                                        .send(notify.into())
+                                        .await
+                                    {
+                                        error!("Failed to send notify to downstream: {:?}", e);
                                     }
                                 }
-                            },
-                            Err(e) => {
-                                break;
+                                return Some(()); // We've handled the notify specially, don't send
+                                                 // it again below
+                            }
+                        }
+
+                        // For all other messages, send them normally
+                        if let Err(e) = self
+                            .downstream_channel_state
+                            .downstream_sv1_sender
+                            .send(message.clone())
+                            .await
+                        {
+                            error!("Failed to send message to downstream: {:?}", e);
+                        } else {
+                            // If this was a set_difficulty message, update the target and hashrate
+                            // from pending values
+                            if let Message::Notification(notification) = &message {
+                                if notification.method == "mining.set_difficulty" {
+                                    self.downstream_data.super_safe_lock(|d| {
+                                        if let Some(new_target) = d.pending_target.take() {
+                                            d.target = new_target;
+                                        }
+                                        if let Some(new_hashrate) = d.pending_hashrate.take() {
+                                            d.hashrate = new_hashrate;
+                                        }
+                                        debug!("Downstream {}: Updated target and hashrate after sending direct set_difficulty", d.downstream_id);
+                                    });
+                                }
                             }
                         }
                     }
                 }
             }
-            drop(shutdown_complete_tx);
-            warn!("Downstream: downstream sender loop exited");
-        });
+            Err(e) => {
+                error!("Something went wrong in Sv1 message handler: {:?}", e);
+            }
+        }
+
+        None
+    }
+
+    pub async fn handle_downstream_message(self: Arc<Self>) -> Option<()> {
+        match self
+            .downstream_channel_state
+            .downstream_sv1_receiver
+            .recv()
+            .await
+        {
+            Ok(message) => {
+                let response = self
+                    .downstream_data
+                    .super_safe_lock(|downstream_data| downstream_data.handle_message(message));
+                if let Ok(Some(response)) = response {
+                    if let Some(channel_id) = self.downstream_data.super_safe_lock(|d| d.channel_id)
+                    {
+                        if let Err(e) = self
+                            .downstream_channel_state
+                            .downstream_sv1_sender
+                            .send(response.into())
+                            .await
+                        {
+                            error!("Failed to send message to downstream: {:?}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    "Something went wrong in downstream message handler: {:?}",
+                    e
+                );
+            }
+        }
+
+        None
     }
 }
 

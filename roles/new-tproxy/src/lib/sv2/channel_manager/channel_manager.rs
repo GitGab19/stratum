@@ -111,6 +111,7 @@ impl ChannelManager {
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
+        info!("Spawning run channel manager task");
         tokio::spawn(async move {
             loop {
                 tokio::select! {

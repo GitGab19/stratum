@@ -322,8 +322,7 @@ impl Sv1Server {
                                             d.extranonce2_len = m.extranonce_size.into();
                                             d.channel_id = Some(m.channel_id);
                                         });
-                                        downstream.clone().spawn_downstream_receiver(notify_shutdown.clone(), shutdown_complete_tx.clone());
-                                        downstream.spawn_downstream_sender(notify_shutdown.clone(), shutdown_complete_tx.clone());
+                                        Downstream::run_downstream_tasks(Arc::new(downstream), notify_shutdown.clone(), shutdown_complete_tx.clone());
                                     } else {
                                         error!("Downstream not found for downstream id: {}", downstream_id);
                                     }
