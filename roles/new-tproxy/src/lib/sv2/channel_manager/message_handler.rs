@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    sv1::downstream::Downstream,
+    sv1::downstream::downstream::Downstream,
     sv2::{channel_manager::channel_manager::ChannelManagerData, ChannelManager, ChannelMode},
     utils::proxy_extranonce_prefix_len,
 };

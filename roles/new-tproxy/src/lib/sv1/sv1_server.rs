@@ -2,9 +2,8 @@ use crate::{
     config::TranslatorConfig,
     error::ProxyResult,
     sv1::{
-        downstream::{Downstream, DownstreamData},
+        downstream::{downstream::Downstream, DownstreamMessages},
         translation_utils::{create_notify, get_set_difficulty},
-        DownstreamMessages,
     },
 };
 use async_channel::{unbounded, Receiver, Sender};
