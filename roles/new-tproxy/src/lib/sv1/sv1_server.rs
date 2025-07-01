@@ -1,10 +1,8 @@
 use crate::{
-    config::TranslatorConfig,
-    error::TproxyError,
-    sv1::{
+    config::TranslatorConfig, error::TproxyError, status::{Status, StatusSender}, sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
         translation_utils::{create_notify, get_set_difficulty},
-    },
+    }
 };
 use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -125,6 +123,7 @@ impl Sv1Server {
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: Sender<Status>
     ) -> Result<(), TproxyError> {
         info!("Starting SV1 server on {}", self.listener_addr);
         let mut shutdown_rx_main = notify_shutdown.subscribe();
@@ -143,13 +142,14 @@ impl Sv1Server {
         tokio::spawn(Self::handle_downstream_message(
             Arc::clone(&self),
             notify_shutdown.subscribe(),
-            shutdown_complete_tx_main_clone.clone(),
+            shutdown_complete_tx_main_clone.clone()
         ));
         tokio::spawn(Self::handle_upstream_message(
             Arc::clone(&self),
             first_target.clone(),
             notify_shutdown.clone(),
             shutdown_complete_tx_main_clone.clone(),
+            status_sender
         ));
 
         // Spawn vardiff loop
@@ -218,7 +218,7 @@ impl Sv1Server {
     pub async fn handle_downstream_message(
         self: Arc<Self>,
         mut notify_shutdown: broadcast::Receiver<()>,
-        shutdown_complete_tx: mpsc::Sender<()>,
+        shutdown_complete_tx: mpsc::Sender<()>
     ) -> Result<(), TproxyError> {
         info!("SV1 Server: Downstream message handler started.");
         loop {
@@ -302,6 +302,7 @@ impl Sv1Server {
         first_target: Target,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: Sender<Status>
     ) -> Result<(), TproxyError> {
         info!("SV1 Server: Upstream message handler started.");
         let mut notify_subscribe = notify_shutdown.subscribe();
@@ -325,7 +326,9 @@ impl Sv1Server {
                                             d.extranonce2_len = m.extranonce_size.into();
                                             d.channel_id = Some(m.channel_id);
                                         });
-                                        Downstream::run_downstream_tasks(Arc::new(downstream), notify_shutdown.clone(), shutdown_complete_tx.clone());
+                                        let downstream_id = downstream.downstream_data.super_safe_lock(|d| d.downstream_id);
+                                        let status_sender = StatusSender::Downstream {downstream_id, tx: status_sender.clone()};
+                                        Downstream::run_downstream_tasks(Arc::new(downstream), notify_shutdown.clone(), shutdown_complete_tx.clone(), status_sender);
                                     } else {
                                         error!("Downstream not found for downstream id: {}", downstream_id);
                                     }

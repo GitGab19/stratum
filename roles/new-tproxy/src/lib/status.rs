@@ -13,7 +13,7 @@ use crate::error::TproxyError;
 /// Each variant contains a channel to the main coordinator, and optionally a component ID
 /// (e.g. a downstream connection ID).
 #[derive(Debug, Clone)]
-pub enum Sender {
+pub enum StatusSender {
     /// A specific downstream connection.
     Downstream {
         downstream_id: u32,
@@ -27,7 +27,7 @@ pub enum Sender {
     Upstream(async_channel::Sender<Status>),
 }
 
-impl Sender {
+impl StatusSender {
     /// Sends a [`Status`] update.
     pub async fn send(&self, status: Status) -> Result<(), async_channel::SendError<Status>> {
         match self {
@@ -64,14 +64,14 @@ pub struct Status {
 }
 
 /// Constructs and sends a [`Status`] update based on the [`Sender`] and error context.
-async fn send_status(sender: &Sender, error: TproxyError) {
+async fn send_status(sender: &StatusSender, error: TproxyError) {
     let state = match sender {
-        Sender::Downstream { downstream_id, .. } => {
+        StatusSender::Downstream { downstream_id, .. } => {
             State::DownstreamShutdown { downstream_id: *downstream_id, reason: error }
         }
-        Sender::Sv1Server(_) => State::Sv1ServerShutdown(error),
-        Sender::ChannelManager(_) => State::ChannelManagerShutdown(error),
-        Sender::Upstream(_) => State::UpstreamShutdown(error),
+        StatusSender::Sv1Server(_) => State::Sv1ServerShutdown(error),
+        StatusSender::ChannelManager(_) => State::ChannelManagerShutdown(error),
+        StatusSender::Upstream(_) => State::UpstreamShutdown(error),
     };
 
     let _ = sender.send(Status { state }).await;
@@ -81,31 +81,7 @@ async fn send_status(sender: &Sender, error: TproxyError) {
 ///
 /// Used by the `handle_result!` macro across the codebase.
 /// Decides whether the task should `Continue` or `Break` based on the error type and source.
-pub async fn handle_error(sender: &Sender, e: TproxyError) {
+pub async fn handle_error(sender: &StatusSender, e: TproxyError) {
     tracing::error!("Error: {:?}", &e);
-    match e {
-        TproxyError::VecToSlice32(_) => send_status(sender, e).await,
-        TproxyError::BadCliArgs => send_status(sender, e).await,
-        TproxyError::BadSerdeJson(_) => send_status(sender, e).await,
-        TproxyError::BadConfigDeserialize(_) => send_status(sender, e).await,
-        TproxyError::BinarySv2(_) => send_status(sender, e).await,
-        TproxyError::CodecNoise(_) => send_status(sender, e).await,
-        TproxyError::FramingSv2(_) => send_status(sender, e).await,
-        TproxyError::InvalidExtranonce(_) => send_status(sender, e).await,
-        TproxyError::Io(_) => send_status(sender, e).await,
-        TproxyError::ParseInt(_) => send_status(sender, e).await,
-        TproxyError::UpstreamIncoming(_) => send_status(sender, e).await,
-        TproxyError::SubprotocolMining(_) => send_status(sender, e).await,
-        TproxyError::PoisonLock => send_status(sender, e).await,
-        TproxyError::ChannelErrorReceiver(_) => send_status(sender, e).await,
-        TproxyError::TokioChannelErrorRecv(_) => send_status(sender, e).await,
-        TproxyError::SetDifficultyToMessage(_) => send_status(sender, e).await,
-        TproxyError::TargetError(_) => send_status(sender, e).await,
-        TproxyError::Sv1MessageTooLong => send_status(sender, e).await,
-        TproxyError::UnexpectedMessage => todo!(),
-        TproxyError::JobNotFound => send_status(sender, e).await,
-        TproxyError::InvalidMerkleRoot => send_status(sender, e).await,
-        TproxyError::Shutdown => send_status(sender, e).await,
-        TproxyError::General(_) => send_status(sender, e).await,
-    }
+    send_status(sender, e).await;
 }
