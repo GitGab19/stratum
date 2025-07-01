@@ -72,11 +72,7 @@ pub struct Status {
 ///
 /// This is the core logic used to determine which status variant should be sent
 /// based on the error type and sender context.
-async fn send_status(
-    sender: &Sender,
-    e: TproxyError,
-    outcome: error_handling::ErrorBranch,
-) -> error_handling::ErrorBranch {
+async fn send_status(sender: &Sender, e: TproxyError) {
     match sender {
         Sender::Downstream(tx) => {
             tx.send(Status {
@@ -107,76 +103,37 @@ async fn send_status(
             .unwrap_or(());
         }
     }
-    outcome
 }
 
 /// Centralized error dispatcher for the Translator.
 ///
 /// Used by the `handle_result!` macro across the codebase.
 /// Decides whether the task should `Continue` or `Break` based on the error type and source.
-pub async fn handle_error(sender: &Sender, e: error::TproxyError) -> error_handling::ErrorBranch {
+pub async fn handle_error(sender: &Sender, e: error::TproxyError) {
     tracing::error!("Error: {:?}", &e);
     match e {
-        TproxyError::VecToSlice32(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::BadCliArgs => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        TproxyError::BadSerdeJson(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::BadConfigDeserialize(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::BinarySv2(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::CodecNoise(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::FramingSv2(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::InvalidExtranonce(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::Io(_) => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        TproxyError::ParseInt(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::UpstreamIncoming(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::SubprotocolMining(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::PoisonLock => send_status(sender, e, error_handling::ErrorBranch::Break).await,
-        TproxyError::ChannelErrorReceiver(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::TokioChannelErrorRecv(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::SetDifficultyToMessage(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::TargetError(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Continue).await
-        }
-        TproxyError::Sv1MessageTooLong => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
+        TproxyError::VecToSlice32(_) => send_status(sender, e).await,
+        TproxyError::BadCliArgs => send_status(sender, e).await,
+        TproxyError::BadSerdeJson(_) => send_status(sender, e).await,
+        TproxyError::BadConfigDeserialize(_) => send_status(sender, e).await,
+        TproxyError::BinarySv2(_) => send_status(sender, e).await,
+        TproxyError::CodecNoise(_) => send_status(sender, e).await,
+        TproxyError::FramingSv2(_) => send_status(sender, e).await,
+        TproxyError::InvalidExtranonce(_) => send_status(sender, e).await,
+        TproxyError::Io(_) => send_status(sender, e).await,
+        TproxyError::ParseInt(_) => send_status(sender, e).await,
+        TproxyError::UpstreamIncoming(_) => send_status(sender, e).await,
+        TproxyError::SubprotocolMining(_) => send_status(sender, e).await,
+        TproxyError::PoisonLock => send_status(sender, e).await,
+        TproxyError::ChannelErrorReceiver(_) => send_status(sender, e).await,
+        TproxyError::TokioChannelErrorRecv(_) => send_status(sender, e).await,
+        TproxyError::SetDifficultyToMessage(_) => send_status(sender, e).await,
+        TproxyError::TargetError(_) => send_status(sender, e).await,
+        TproxyError::Sv1MessageTooLong => send_status(sender, e).await,
         TproxyError::UnexpectedMessage => todo!(),
-        TproxyError::JobNotFound => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::InvalidMerkleRoot => {
-            send_status(sender, e, error_handling::ErrorBranch::Break).await
-        }
-        TproxyError::Shutdown => {
-            send_status(sender, e, error_handling::ErrorBranch::Continue).await
-        }
-        TproxyError::General(_) => {
-            send_status(sender, e, error_handling::ErrorBranch::Continue).await
-        }
+        TproxyError::JobNotFound => send_status(sender, e).await,
+        TproxyError::InvalidMerkleRoot => send_status(sender, e).await,
+        TproxyError::Shutdown => send_status(sender, e).await,
+        TproxyError::General(_) => send_status(sender, e).await,
     }
 }
