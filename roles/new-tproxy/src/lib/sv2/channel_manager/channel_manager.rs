@@ -1,5 +1,7 @@
 use crate::{
     config::TranslatorConfig,
+    error::TproxyError,
+    status::{handle_error, Status, StatusSender},
     sv2::upstream::upstream::{EitherFrame, Message, StdFrame},
     utils::into_static,
 };
@@ -116,9 +118,11 @@ impl ChannelManager {
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: Sender<Status>,
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         info!("Spawning run channel manager task");
+        let status_sender = StatusSender::ChannelManager(status_sender);
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -126,8 +130,18 @@ impl ChannelManager {
                         info!("ChannelManager: received shutdown signal.");
                         break;
                     }
-                    Some(_) = Self::handle_upstream_message(self.clone()) => {},
-                    Some(_) = Self::handle_downstream_message(self.clone()) => {},
+                    res = Self::handle_upstream_message(self.clone()) => {
+                        if let Err(e) = res {
+                            handle_error(&status_sender, e);
+                            break;
+                        }
+                    },
+                    res = Self::handle_downstream_message(self.clone()) => {
+                        if let Err(e) = res {
+                            handle_error(&status_sender, e);
+                            break;
+                        }
+                    },
                     else => {
                         warn!("All channel manager message streams closed. Exiting...");
                         break;
@@ -144,7 +158,7 @@ impl ChannelManager {
         });
     }
 
-    pub async fn handle_upstream_message(self: Arc<Self>) -> Option<()> {
+    pub async fn handle_upstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         match self.channel_state.upstream_receiver.recv().await {
             Ok(message) => {
                 if let Frame::Sv2(mut frame) = message {
@@ -261,13 +275,13 @@ impl ChannelManager {
                         }
                     }
                 }
-                Some(())
             }
-            Err(e) => None,
+            Err(e) => return Err(TproxyError::ChannelErrorReceiver(e)),
         }
+        Ok(())
     }
 
-    pub async fn handle_downstream_message(self: Arc<Self>) -> Option<()> {
+    pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         match self.channel_state.sv1_server_receiver.recv().await {
             Ok(message) => {
                 match message {
@@ -448,7 +462,7 @@ impl ChannelManager {
                                         });
                                     }
                                 }
-                                return Some(());
+                                return Ok(());
                             } else {
                                 // We don't have the unique channel open yet and so we send the
                                 // OpenExtendedMiningChannel message to the upstream
@@ -493,9 +507,9 @@ impl ChannelManager {
                     }
                     _ => {}
                 }
-                Some(())
             }
-            Err(e) => None,
+            Err(e) => return Err(TproxyError::ChannelErrorReceiver(e)),
         }
+        Ok(())
     }
 }

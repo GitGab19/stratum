@@ -1,4 +1,8 @@
-use crate::{error::TproxyError, utils::message_from_frame};
+use crate::{
+    error::TproxyError,
+    status::{handle_error, Status, StatusSender},
+    utils::message_from_frame,
+};
 use async_channel::{Receiver, Sender};
 use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
 use key_utils::Secp256k1PublicKey;
@@ -116,6 +120,7 @@ impl Upstream {
         self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: Sender<Status>,
     ) -> Result<(), TproxyError> {
         info!("Upstream starting...");
         let mut shutdown_rx = notify_shutdown.subscribe();
@@ -133,7 +138,8 @@ impl Upstream {
                 return Ok(());
             }
         }
-        self.run_upstream_task(notify_shutdown, shutdown_complete_tx)?;
+        let status_sender = StatusSender::Upstream(status_sender);
+        self.run_upstream_task(notify_shutdown, shutdown_complete_tx, status_sender)?;
         Ok(())
     }
 
@@ -236,6 +242,7 @@ impl Upstream {
         self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: StatusSender,
     ) -> Result<(), TproxyError> {
         let mut shutdown_rx = notify_shutdown.subscribe();
         let shutdown_complete_tx = shutdown_complete_tx.clone();
@@ -256,10 +263,12 @@ impl Upstream {
                                 debug!("Received frame from upstream.");
                                 if let Err(e) = self.on_upstream_message(frame).await {
                                     error!("Error while processing upstream message: {:?}", e);
+                                    handle_error(&status_sender, TproxyError::ChannelErrorSender);
                                 }
                             }
                             Err(e) => {
                                 error!("Upstream receiver channel error: {:?}. Exiting loop.", e);
+                                handle_error(&status_sender, TproxyError::ChannelErrorReceiver(e));
                                 break;
                             }
                         }
@@ -271,10 +280,12 @@ impl Upstream {
                                 debug!("Received message from channel manager to send upstream.");
                                 if let Err(e) = self.send_upstream(msg).await {
                                     error!("Failed to send message upstream: {:?}", e);
+                                    handle_error(&status_sender, TproxyError::ChannelErrorSender);
                                 }
                             }
                             Err(e) => {
                                 error!("Channel manager receiver channel error: {e:?}. Exiting loop.");
+                                handle_error(&status_sender, TproxyError::ChannelErrorReceiver(e));
                                 break;
                             }
                         }
