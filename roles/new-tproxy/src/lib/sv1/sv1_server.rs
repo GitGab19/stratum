@@ -1,7 +1,7 @@
 use crate::{
     config::TranslatorConfig,
     error::TproxyError,
-    status::{Status, StatusSender},
+    status::{handle_error, Status, StatusSender},
     sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
         translation_utils::{create_notify, get_set_difficulty},
@@ -216,6 +216,7 @@ impl Sv1Server {
                     Arc::clone(&self)
                 ) => {
                     if let Err(e) = res {
+                        handle_error(&sv1_status_sender, e);
                         break;
                     }
                 }
@@ -227,6 +228,7 @@ impl Sv1Server {
                     status_sender.clone()
                 ) => {
                     if let Err(e) = res {
+                        handle_error(&sv1_status_sender, e);
                         break;
                     }
                 }
