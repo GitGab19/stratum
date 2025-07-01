@@ -15,7 +15,7 @@ use roles_logic_sv2::{
 use tracing::{debug, error, info};
 use v1::{client_to_server, server_to_client, utils::HexU32Be};
 
-use crate::error::{Error, ProxyResult};
+use crate::error::TproxyError;
 
 pub fn validate_sv1_share(
     share: &client_to_server::Submit<'static>,
@@ -23,13 +23,13 @@ pub fn validate_sv1_share(
     extranonce1: Vec<u8>,
     version_rolling_mask: Option<HexU32Be>,
     valid_jobs: &[server_to_client::Notify<'static>],
-) -> ProxyResult<'static, bool> {
+) -> Result<bool, TproxyError> {
     let job_id = share.job_id.clone();
 
     let job = valid_jobs
         .iter()
         .find(|job| job.job_id == job_id)
-        .ok_or(Error::JobNotFound)?;
+        .ok_or(TproxyError::JobNotFound)?;
 
     let mut full_extranonce = vec![];
     full_extranonce.extend_from_slice(extranonce1.as_slice());
@@ -44,7 +44,8 @@ pub fn validate_sv1_share(
     let version = (job.version.0 & !mask) | (share_version & mask);
 
     let prev_hash_vec: Vec<u8> = job.prev_hash.clone().into();
-    let prev_hash = binary_sv2::U256::from_vec_(prev_hash_vec).map_err(|e| Error::BinarySv2(e))?;
+    let prev_hash =
+        binary_sv2::U256::from_vec_(prev_hash_vec).map_err(|e| TproxyError::BinarySv2(e))?;
 
     // calculate the merkle root from:
     // - job coinbase_tx_prefix
@@ -57,9 +58,9 @@ pub fn validate_sv1_share(
         full_extranonce.as_ref(),
         &job.merkle_branch.as_ref(),
     )
-    .ok_or(Error::InvalidMerkleRoot)?
+    .ok_or(TproxyError::InvalidMerkleRoot)?
     .try_into()
-    .map_err(|_| Error::InvalidMerkleRoot)?;
+    .map_err(|_| TproxyError::InvalidMerkleRoot)?;
 
     // create the header for validation
     let header = Header {
@@ -111,10 +112,10 @@ pub fn proxy_extranonce_prefix_len(
 
 pub fn message_from_frame(
     frame: &mut Frame<AnyMessage<'static>, Slice>,
-) -> ProxyResult<'static, (u8, Vec<u8>, AnyMessage<'static>)> {
+) -> Result<(u8, Vec<u8>, AnyMessage<'static>), TproxyError> {
     match frame {
         Frame::Sv2(frame) => {
-            let header = frame.get_header().ok_or(Error::UnexpectedMessage)?;
+            let header = frame.get_header().ok_or(TproxyError::UnexpectedMessage)?;
             let message_type = header.msg_type();
             let mut payload = frame.payload().to_vec();
             let message: Result<AnyMessage<'_>, _> =
@@ -126,18 +127,18 @@ pub fn message_from_frame(
                 }
                 Err(_) => {
                     error!("Received frame with invalid payload or message type: {frame:?}");
-                    Err(Error::UnexpectedMessage)
+                    Err(TproxyError::UnexpectedMessage)
                 }
             }
         }
         Frame::HandShake(f) => {
             error!("Received unexpected handshake frame: {f:?}");
-            Err(Error::UnexpectedMessage)
+            Err(TproxyError::UnexpectedMessage)
         }
     }
 }
 
-pub fn into_static(m: AnyMessage<'_>) -> ProxyResult<'static, AnyMessage<'static>> {
+pub fn into_static(m: AnyMessage<'_>) -> Result<AnyMessage<'static>, TproxyError> {
     match m {
         AnyMessage::Mining(m) => Ok(AnyMessage::Mining(m.into_static())),
         AnyMessage::Common(m) => match m {
@@ -157,6 +158,6 @@ pub fn into_static(m: AnyMessage<'_>) -> ProxyResult<'static, AnyMessage<'static
                 m.into_static(),
             ))),
         },
-        _ => Err(Error::UnexpectedMessage),
+        _ => Err(TproxyError::UnexpectedMessage),
     }
 }

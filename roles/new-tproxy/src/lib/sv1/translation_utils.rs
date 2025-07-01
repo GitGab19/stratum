@@ -10,8 +10,7 @@ use v1::{
     utils::{HexU32Be, MerkleNode, PrevHash},
 };
 
-use crate::error::ProxyResult;
-
+use crate::error::TproxyError;
 /// Creates a new SV1 `mining.notify` message if both SV2 `SetNewPrevHash` and
 /// `NewExtendedMiningJob` messages have been received. If one of these messages is still being
 /// waited on, the function returns `None`.
@@ -61,7 +60,7 @@ pub fn create_notify(
     notify_response
 }
 
-pub fn get_set_difficulty(target: Target) -> ProxyResult<'static, json_rpc::Message> {
+pub fn get_set_difficulty(target: Target) -> Result<json_rpc::Message, TproxyError> {
     let value = difficulty_from_target(target)?;
     debug!("Difficulty from target: {:?}", value);
     let set_target = v1::methods::server_to_client::SetDifficulty { value };
@@ -72,7 +71,7 @@ pub fn get_set_difficulty(target: Target) -> ProxyResult<'static, json_rpc::Mess
 /// Converts target received by the `SetTarget` SV2 message from the Upstream role into the
 /// difficulty for the Downstream role sent via the SV1 `mining.set_difficulty` message.
 #[allow(clippy::result_large_err)]
-pub(super) fn difficulty_from_target(target: Target) -> ProxyResult<'static, f64> {
+pub(super) fn difficulty_from_target(target: Target) -> Result<f64, TproxyError> {
     // reverse because target is LE and this function relies on BE
     let mut target = binary_sv2::U256::from(target).to_vec();
 
