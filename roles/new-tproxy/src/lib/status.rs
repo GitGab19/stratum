@@ -6,6 +6,8 @@
 //! Each task wraps its report in a [`Status`] and sends it over an async channel,
 //! tagged with a [`Sender`] variant that identifies the source subsystem.
 
+use tracing::error;
+
 use crate::error::TproxyError;
 
 /// Identifies the component that originated a [`Status`] update.
@@ -83,6 +85,6 @@ async fn send_status(sender: &StatusSender, error: TproxyError) {
 /// Used by the `handle_result!` macro across the codebase.
 /// Decides whether the task should `Continue` or `Break` based on the error type and source.
 pub async fn handle_error(sender: &StatusSender, e: TproxyError) {
-    tracing::error!("Error: {:?}", &e);
+    error!("Error: {:?}", &e);
     send_status(sender, e).await;
 }

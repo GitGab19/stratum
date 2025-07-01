@@ -3,7 +3,7 @@ use crate::{
     error::TproxyError,
     status::{handle_error, Status, StatusSender},
     sv2::upstream::upstream::{EitherFrame, Message, StdFrame},
-    utils::into_static,
+    utils::{into_static, ShutdownMessage},
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::Frame;
@@ -116,7 +116,7 @@ impl ChannelManager {
 
     pub async fn run_channel_manager_tasks(
         self: Arc<Self>,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
     ) {
@@ -126,9 +126,14 @@ impl ChannelManager {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = shutdown_rx.recv() => {
-                        info!("ChannelManager: received shutdown signal.");
-                        break;
+                    message = shutdown_rx.recv() => {
+                        match message {
+                            Ok(ShutdownMessage::ShutdownAll) => {
+                                info!("ChannelManager: received shutdown signal.");
+                                break;
+                            }
+                            _ => {}
+                        }
                     }
                     res = Self::handle_upstream_message(self.clone()) => {
                         if let Err(e) = res {
