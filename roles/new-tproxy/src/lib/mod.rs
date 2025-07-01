@@ -144,7 +144,7 @@ impl TranslatorSv2 {
                         break;
                     }
                     message = status_receiver.recv() => {
-                        error!("I received some error");
+                        error!("I received some error: {message:?}");
                     }
                 }
             }
@@ -155,6 +155,7 @@ impl TranslatorSv2 {
             sv1_server,
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
+            status_sender.clone(),
         )
         .await;
 

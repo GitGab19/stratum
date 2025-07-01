@@ -1,5 +1,5 @@
 use super::DownstreamMessages;
-use crate::utils::validate_sv1_share;
+use crate::{error::TproxyError, handle_status_result, status::{handle_error, StatusSender}, utils::validate_sv1_share};
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
@@ -142,6 +142,7 @@ impl Downstream {
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
+        status_sender: StatusSender
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         info!("Spawning downstream tasks");
@@ -156,8 +157,18 @@ impl Downstream {
                         info!("Downstream: received shutdown signal");
                         break;
                     }
-                    Some(_) = Self::handle_downstream_message(self.clone()) => {},
-                    Some(_) = Self::handle_sv1_server_message(self.clone(), sv1_server_receiver) => {},
+                    res = Self::handle_downstream_message(self.clone()) => {
+                        if let Err(e) = res {
+                            handle_error(&status_sender, e);
+                            break;
+                        }
+                    },
+                    res = Self::handle_sv1_server_message(self.clone(), sv1_server_receiver) => {
+                        if let Err(e) = res {
+                            handle_error(&status_sender, e);
+                            break;
+                        }
+                    },
                     else => {
                         warn!("Downstream: all channels closed, exiting loop");
                         break;
@@ -173,7 +184,7 @@ impl Downstream {
     pub async fn handle_sv1_server_message(
         self: Arc<Self>,
         mut sv1_server_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>,
-    ) -> Option<()> {
+    ) -> Result<(), TproxyError> {
         match sv1_server_receiver.recv().await {
             Ok((channel_id, downstream_id, message)) => {
                 if let Some(downstream_channel_id) =
@@ -191,7 +202,7 @@ impl Downstream {
                                 self.downstream_data.super_safe_lock(|d| {
                                     d.pending_set_difficulty = Some(message.clone());
                                 });
-                                return Some(()); // Don't send set_difficulty immediately, wait for
+                                return Ok(()); // Don't send set_difficulty immediately, wait for
                                                  // next notify
                             }
                         }
@@ -217,6 +228,7 @@ impl Downstream {
                                             "Failed to send set_difficulty to downstream: {:?}",
                                             e
                                         );
+                                        return Err(TproxyError::ChannelErrorSender);
                                     } else {
                                         // Update target and hashrate after successful send
                                         self.downstream_data.super_safe_lock(|d| {
@@ -267,9 +279,10 @@ impl Downstream {
                                         .await
                                     {
                                         error!("Failed to send notify to downstream: {:?}", e);
+                                        return Err(TproxyError::ChannelErrorSender);
                                     }
                                 }
-                                return Some(()); // We've handled the notify specially, don't send
+                                return Ok(()); // We've handled the notify specially, don't send
                                                  // it again below
                             }
                         }
@@ -282,6 +295,8 @@ impl Downstream {
                             .await
                         {
                             error!("Failed to send message to downstream: {:?}", e);
+                            /// This could mean sv1 server is down
+                            return Err(TproxyError::ChannelErrorSender);
                         } else {
                             // If this was a set_difficulty message, update the target and hashrate
                             // from pending values
@@ -303,14 +318,14 @@ impl Downstream {
                 }
             }
             Err(e) => {
-                error!("Something went wrong in Sv1 message handler: {:?}", e);
+                error!("Something went wrong in Sv1 message handler in downstream {}: {:?}",self.downstream_data.super_safe_lock(|d| d.downstream_id), e);
+                return Err(TproxyError::BroadcastChannelErrorReceiver(e));
             }
         }
-
-        None
+        Ok(())
     }
 
-    pub async fn handle_downstream_message(self: Arc<Self>) -> Option<()> {
+    pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         match self
             .downstream_channel_state
             .downstream_sv1_receiver
@@ -331,6 +346,7 @@ impl Downstream {
                             .await
                         {
                             error!("Failed to send message to downstream: {:?}", e);
+                            return Err(TproxyError::ChannelErrorSender);
                         }
                     }
                 }
@@ -340,9 +356,9 @@ impl Downstream {
                     "Something went wrong in downstream message handler: {:?}",
                     e
                 );
+                return Err(TproxyError::ChannelErrorReceiver(e));
             }
         }
-
-        None
+        Ok(())
     }
 }
