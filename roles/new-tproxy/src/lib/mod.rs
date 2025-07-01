@@ -22,7 +22,10 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    error::TproxyError, status::Status, sv1::sv1_server::Sv1Server, sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream}
+    error::TproxyError,
+    status::Status,
+    sv1::sv1_server::Sv1Server,
+    sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream},
 };
 
 pub mod config;

@@ -15,8 +15,8 @@ use roles_logic_sv2::{
     parsers::{AnyMessage, Mining},
     vardiff::error::VardiffError,
 };
-use tokio::sync::broadcast;
 use std::{fmt, sync::PoisonError};
+use tokio::sync::broadcast;
 use v1::server_to_client::{Notify, SetDifficulty};
 
 #[derive(Debug)]
@@ -84,7 +84,9 @@ impl fmt::Display for TproxyError {
             UpstreamIncoming(ref e) => write!(f, "Upstream parse incoming error: `{:?}`", e),
             PoisonLock => write!(f, "Poison Lock error"),
             ChannelErrorReceiver(ref e) => write!(f, "Channel receive error: `{:?}`", e),
-            BroadcastChannelErrorReceiver(ref e) => write!(f, "Broadcast channel receive error: {:?}", e),
+            BroadcastChannelErrorReceiver(ref e) => {
+                write!(f, "Broadcast channel receive error: {:?}", e)
+            }
             ChannelErrorSender => write!(f, "Sender error"),
             TokioChannelErrorRecv(ref e) => write!(f, "Channel receive error: `{:?}`", e),
             SetDifficultyToMessage(ref e) => {
