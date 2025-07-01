@@ -1,7 +1,7 @@
 use crate::{
     error::TproxyError,
     status::{handle_error, Status, StatusSender},
-    utils::message_from_frame,
+    utils::{message_from_frame, ShutdownMessage},
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
@@ -68,7 +68,7 @@ impl Upstream {
         upstream_authority_public_key: Secp256k1PublicKey,
         channel_manager_sender: Sender<EitherFrame>,
         channel_manager_receiver: Receiver<EitherFrame>,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) -> Result<Self, TproxyError> {
         let socket = loop {
@@ -118,7 +118,7 @@ impl Upstream {
 
     pub async fn start(
         self,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
     ) -> Result<(), TproxyError> {
@@ -240,7 +240,7 @@ impl Upstream {
 
     fn run_upstream_task(
         self,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: StatusSender,
     ) -> Result<(), TproxyError> {
@@ -252,11 +252,15 @@ impl Upstream {
 
             loop {
                 tokio::select! {
-                    _ = shutdown_rx.recv() => {
-                        info!("Upstream task received shutdown signal. Exiting loop.");
-                        break;
+                    message = shutdown_rx.recv() => {
+                        match message {
+                            Ok(ShutdownMessage::ShutdownAll) => {
+                                info!("Upstream task received shutdown signal. Exiting loop.");
+                                break;
+                            }
+                            _ => {}
+                        }
                     }
-
                     msg = self.upstream_channel_state.upstream_receiver.recv() => {
                         match msg {
                             Ok(frame) => {

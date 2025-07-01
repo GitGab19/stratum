@@ -12,7 +12,7 @@ use tracing::error;
 
 /// Process CLI args, if any.
 #[allow(clippy::result_large_err)]
-fn process_cli_args<'a>() -> Result<TranslatorConfig, TproxyError> {
+fn process_cli_args() -> Result<TranslatorConfig, TproxyError> {
     // Parse CLI arguments
     let args = Args::from_args().map_err(|help| {
         error!("{}", help);

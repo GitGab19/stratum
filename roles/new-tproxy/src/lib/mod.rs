@@ -23,9 +23,10 @@ use config::TranslatorConfig;
 
 use crate::{
     error::TproxyError,
-    status::Status,
+    status::{State, Status},
     sv1::sv1_server::Sv1Server,
     sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream},
+    utils::ShutdownMessage,
 };
 
 pub mod config;
@@ -56,7 +57,7 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
-        let (notify_shutdown, _) = tokio::sync::broadcast::channel::<()>(1);
+        let (notify_shutdown, _) = tokio::sync::broadcast::channel::<ShutdownMessage>(1);
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel::<()>(1);
 
         let (status_sender, status_receiver) = async_channel::unbounded::<Status>();
@@ -148,17 +149,39 @@ impl TranslatorSv2 {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
                         info!("Ctrl+c received. Intiating graceful shutdown...");
-                        notify_shutdown_clone.send(()).unwrap();
+                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                         break;
                     }
                     message = status_receiver.recv() => {
                         error!("I received some error: {message:?}");
-                        // otify_shutdown_clone.send(()).unwrap();
-                        // handle error for downstream,
+                        match message {
+                            Ok(status) => {
+                                match status.state {
+                                    State::DownstreamShutdown{downstream_id,..} => {
+                                        notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdown(downstream_id)).unwrap();
+                                    }
+                                    State::Sv1ServerShutdown(_) => {
+                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                        break;
+                                    }
+                                    State::ChannelManagerShutdown(_) => {
+                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                        break;
+                                    }
+                                    State::UpstreamShutdown(_) => {
+                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                        break;
+                                    }
+                                    State::Healthy(_) => {
+                                    }
+
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
-            warn!("ctrl c block exited");
         });
 
         Sv1Server::start(
