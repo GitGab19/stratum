@@ -1,7 +1,4 @@
-use crate::{
-    error::{Error, ProxyResult},
-    utils::message_from_frame,
-};
+use crate::{error::TproxyError, utils::message_from_frame};
 use async_channel::{Receiver, Sender};
 use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
 use key_utils::Secp256k1PublicKey;
@@ -69,7 +66,7 @@ impl Upstream {
         channel_manager_receiver: Receiver<EitherFrame>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, Self> {
+    ) -> Result<Self, TproxyError> {
         let socket = loop {
             match TcpStream::connect(upstream_address).await {
                 Ok(socket) => {
@@ -85,7 +82,7 @@ impl Upstream {
                     if notify_shutdown.subscribe().try_recv().is_ok() {
                         info!("Shutdown signal received during upstream connection attempt. Aborting.");
                         drop(shutdown_complete_tx);
-                        return Err(Error::Shutdown);
+                        return Err(TproxyError::Shutdown);
                     }
                 }
             }
@@ -119,7 +116,7 @@ impl Upstream {
         self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, ()> {
+    ) -> Result<(), TproxyError> {
         info!("Upstream starting...");
         let mut shutdown_rx = notify_shutdown.subscribe();
         tokio::select! {
@@ -141,18 +138,19 @@ impl Upstream {
     }
 
     /// Handles SV2 handshake setup with the upstream.
-    pub async fn setup_connection(&self) -> ProxyResult<'static, ()> {
+    pub async fn setup_connection(&self) -> Result<(), TproxyError> {
         info!("Setting up SV2 connection with upstream.");
 
         let setup_connection = Self::get_setup_connection_message(2, 2, false)?;
-        let sv2_frame: StdFrame = Message::Common(setup_connection.into()).try_into()?;
+        let sv2_frame: StdFrame = Message::Common(setup_connection.into()).try_into().unwrap();
         let either_frame = sv2_frame.into();
 
         info!("Sending SetupConnection message to upstream.");
         self.upstream_channel_state
             .upstream_sender
             .send(either_frame)
-            .await?;
+            .await
+            .unwrap();
 
         let mut incoming: StdFrame =
             match self.upstream_channel_state.upstream_receiver.recv().await {
@@ -162,7 +160,7 @@ impl Upstream {
                 }
                 Err(e) => {
                     error!("Failed to receive handshake response from upstream: {}", e);
-                    return Err(Error::CodecNoise(
+                    return Err(TproxyError::CodecNoise(
                         codec_sv2::noise_sv2::Error::ExpectedIncomingHandshakeMessage,
                     ));
                 }
@@ -182,15 +180,16 @@ impl Upstream {
             self.upstream_channel_data.clone(),
             message_type,
             payload,
-        )?;
+        )
+        .unwrap();
 
         Ok(())
     }
 
-    pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), Error> {
+    pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), TproxyError> {
         match message {
             EitherFrame::Sv2(sv2_frame) => {
-                let mut std_frame: StdFrame = sv2_frame.try_into()?;
+                let mut std_frame: StdFrame = sv2_frame.try_into().unwrap();
 
                 // Use message_from_frame to parse the message
                 let mut frame: codec_sv2::Frame<AnyMessage<'static>, buffer_sv2::Slice> =
@@ -204,7 +203,8 @@ impl Upstream {
                             self.upstream_channel_data.clone(),
                             message_type,
                             payload.as_mut_slice(),
-                        )?;
+                        )
+                        .unwrap();
                     }
                     AnyMessage::Mining(_) => {
                         // Mining message - send to channel manager
@@ -215,12 +215,13 @@ impl Upstream {
                             .await
                             .map_err(|e| {
                                 error!("Failed to send message to channel manager: {:?}", e);
-                                Error::ChannelErrorSender
+                                // TproxyError::ChannelErrorSender
+                                TproxyError::General("Channel sender Error".to_string())
                             });
                     }
                     _ => {
                         // Other message types - return error
-                        return Err(Error::UnexpectedMessage);
+                        return Err(TproxyError::UnexpectedMessage);
                     }
                 }
             }
@@ -235,7 +236,7 @@ impl Upstream {
         self,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, ()> {
+    ) -> Result<(), TproxyError> {
         let mut shutdown_rx = notify_shutdown.subscribe();
         let shutdown_complete_tx = shutdown_complete_tx.clone();
 
@@ -294,13 +295,14 @@ impl Upstream {
     }
 
     /// Sends a mining message to upstream.
-    pub async fn send_upstream(&self, sv2_frame: EitherFrame) -> ProxyResult<'static, ()> {
+    pub async fn send_upstream(&self, sv2_frame: EitherFrame) -> Result<(), TproxyError> {
         debug!("Sending message to upstream.");
         let either_frame = sv2_frame.into();
         self.upstream_channel_state
             .upstream_sender
             .send(either_frame)
-            .await?;
+            .await
+            .unwrap();
         Ok(())
     }
 
@@ -310,7 +312,7 @@ impl Upstream {
         min_version: u16,
         max_version: u16,
         is_work_selection_enabled: bool,
-    ) -> ProxyResult<'static, SetupConnection<'static>> {
+    ) -> Result<SetupConnection<'static>, TproxyError> {
         let endpoint_host = "0.0.0.0".to_string().into_bytes().try_into()?;
         let vendor = "SRI".to_string().try_into()?;
         let hardware_version = "Translator Proxy".to_string().try_into()?;
