@@ -1,6 +1,6 @@
 use crate::{
     config::TranslatorConfig,
-    error::ProxyResult,
+    error::TproxyError,
     sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
         translation_utils::{create_notify, get_set_difficulty},
@@ -125,7 +125,7 @@ impl Sv1Server {
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, ()> {
+    ) -> Result<(), TproxyError> {
         info!("Starting SV1 server on {}", self.listener_addr);
         let mut shutdown_rx_main = notify_shutdown.subscribe();
         let shutdown_complete_tx_main_clone = shutdown_complete_tx.clone();
@@ -219,7 +219,7 @@ impl Sv1Server {
         self: Arc<Self>,
         mut notify_shutdown: broadcast::Receiver<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, ()> {
+    ) -> Result<(), TproxyError> {
         info!("SV1 Server: Downstream message handler started.");
         loop {
             tokio::select! {
@@ -240,21 +240,25 @@ impl Sv1Server {
                                     });
 
                                     // For version masking see https://github.com/slushpool/stratumprotocol/blob/master/stratum-extensions.mediawiki#changes-in-request-miningsubmit
-                                    let last_job_version =
-                                        message
-                                            .last_job_version
-                                            .ok_or(crate::error::Error::RolesSv2Logic(
-                                                roles_logic_sv2::errors::Error::NoValidJob,
-                                            ))?;
+                                    // when better error handling is there, uncomment this
+                                    // let last_job_version =
+                                    //     message
+                                    //         .last_job_version
+                                    //         .ok_or(crate::error::TproxyError::RolesSv2Logic(
+                                    //             roles_logic_sv2::errors::Error::NoValidJob,
+                                    //         ))?;
+                                    let last_job_version = message.last_job_version.ok_or(crate::error::TproxyError::General(format!("No valid job")))?;
                                     let version = match (message.share.version_bits, message.version_rolling_mask) {
                                         (Some(version_bits), Some(rolling_mask)) => {
                                             (last_job_version & !rolling_mask.0) | (version_bits.0 & rolling_mask.0)
                                         }
                                         (None, None) => last_job_version,
                                         _ => {
-                                            return Err(crate::error::Error::V1Protocol(
-                                                v1::error::Error::InvalidSubmission,
-                                            ))
+                                            // We are not handling error yet
+                                            return Err(crate::error::TproxyError::General(format!("Invalid submission Error")));
+                                            // return Err(crate::error::TproxyError::V1Protocol(
+                                            //     v1::error::Error::InvalidSubmission,
+                                            // ))
                                         }
                                     };
                                     let extranonce: Vec<u8> = message.share.extra_nonce2.into();
@@ -298,7 +302,7 @@ impl Sv1Server {
         first_target: Target,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-    ) -> ProxyResult<'static, ()> {
+    ) -> Result<(), TproxyError> {
         info!("SV1 Server: Upstream message handler started.");
         let mut notify_subscribe = notify_shutdown.subscribe();
         loop {
@@ -376,7 +380,7 @@ impl Sv1Server {
         &self,
         connection: ConnectionSV1,
         downstream: Downstream,
-    ) -> ProxyResult<'static, Option<u32>> {
+    ) -> Result<Option<u32>, TproxyError> {
         let hashrate = self
             .config
             .downstream_difficulty_config
