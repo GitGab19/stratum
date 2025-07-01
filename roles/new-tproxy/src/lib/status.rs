@@ -66,9 +66,10 @@ pub struct Status {
 /// Constructs and sends a [`Status`] update based on the [`Sender`] and error context.
 async fn send_status(sender: &StatusSender, error: TproxyError) {
     let state = match sender {
-        StatusSender::Downstream { downstream_id, .. } => {
-            State::DownstreamShutdown { downstream_id: *downstream_id, reason: error }
-        }
+        StatusSender::Downstream { downstream_id, .. } => State::DownstreamShutdown {
+            downstream_id: *downstream_id,
+            reason: error,
+        },
         StatusSender::Sv1Server(_) => State::Sv1ServerShutdown(error),
         StatusSender::ChannelManager(_) => State::ChannelManagerShutdown(error),
         StatusSender::Upstream(_) => State::UpstreamShutdown(error),

@@ -1,5 +1,10 @@
 use super::DownstreamMessages;
-use crate::{error::TproxyError, handle_status_result, status::{handle_error, StatusSender}, utils::validate_sv1_share};
+use crate::{
+    error::TproxyError,
+    handle_status_result,
+    status::{handle_error, StatusSender},
+    utils::validate_sv1_share,
+};
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{
     common_properties::{CommonDownstreamData, IsDownstream, IsMiningDownstream},
@@ -142,7 +147,7 @@ impl Downstream {
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<()>,
         shutdown_complete_tx: mpsc::Sender<()>,
-        status_sender: StatusSender
+        status_sender: StatusSender,
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         info!("Spawning downstream tasks");
@@ -203,7 +208,7 @@ impl Downstream {
                                     d.pending_set_difficulty = Some(message.clone());
                                 });
                                 return Ok(()); // Don't send set_difficulty immediately, wait for
-                                                 // next notify
+                                               // next notify
                             }
                         }
 
@@ -283,7 +288,7 @@ impl Downstream {
                                     }
                                 }
                                 return Ok(()); // We've handled the notify specially, don't send
-                                                 // it again below
+                                               // it again below
                             }
                         }
 
@@ -318,7 +323,11 @@ impl Downstream {
                 }
             }
             Err(e) => {
-                error!("Something went wrong in Sv1 message handler in downstream {}: {:?}",self.downstream_data.super_safe_lock(|d| d.downstream_id), e);
+                error!(
+                    "Something went wrong in Sv1 message handler in downstream {}: {:?}",
+                    self.downstream_data.super_safe_lock(|d| d.downstream_id),
+                    e
+                );
                 return Err(TproxyError::BroadcastChannelErrorReceiver(e));
             }
         }
