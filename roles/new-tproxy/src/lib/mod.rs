@@ -22,8 +22,7 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    sv1::sv1_server::Sv1Server,
-    sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream},
+    error::TproxyError, status::Status, sv1::sv1_server::Sv1Server, sv2::{channel_manager::channel_manager::ChannelMode, ChannelManager, Upstream}
 };
 
 pub mod config;
@@ -56,6 +55,8 @@ impl TranslatorSv2 {
     pub async fn start(self) {
         let (notify_shutdown, _) = tokio::sync::broadcast::channel::<()>(1);
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel::<()>(1);
+
+        let (status_sender, status_receiver) = async_channel::unbounded::<Status>();
 
         let (channel_manager_to_upstream_sender, channel_manager_to_upstream_receiver) =
             unbounded();
@@ -141,6 +142,9 @@ impl TranslatorSv2 {
                         info!("Ctrl+c received. Intiating graceful shutdown...");
                         notify_shutdown_clone.send(()).unwrap();
                         break;
+                    }
+                    message = status_receiver.recv() => {
+                        error!("I received some error");
                     }
                 }
             }
