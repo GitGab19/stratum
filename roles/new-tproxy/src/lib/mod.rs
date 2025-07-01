@@ -127,11 +127,16 @@ impl TranslatorSv2 {
             channel_manager.clone(),
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
+            status_sender.clone(),
         )
         .await;
 
         if let Err(e) = upstream
-            .start(notify_shutdown.clone(), shutdown_complete_tx.clone())
+            .start(
+                notify_shutdown.clone(),
+                shutdown_complete_tx.clone(),
+                status_sender.clone(),
+            )
             .await
         {
             error!("Failed to start upstream listener: {:?}", e);
@@ -148,6 +153,8 @@ impl TranslatorSv2 {
                     }
                     message = status_receiver.recv() => {
                         error!("I received some error: {message:?}");
+                        // otify_shutdown_clone.send(()).unwrap();
+                        // handle error for downstream,
                     }
                 }
             }
