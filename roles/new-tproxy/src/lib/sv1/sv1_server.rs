@@ -6,6 +6,7 @@ use crate::{
         downstream::{downstream::Downstream, DownstreamMessages},
         translation_utils::{create_notify, get_set_difficulty},
     },
+    utils::ShutdownMessage,
 };
 use async_channel::{unbounded, Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -136,7 +137,7 @@ impl Sv1Server {
 
     pub async fn start(
         self: Arc<Self>,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
     ) -> Result<(), TproxyError> {
@@ -170,9 +171,20 @@ impl Sv1Server {
 
         loop {
             tokio::select! {
-                _ = shutdown_rx_main.recv() => {
-                    info!("SV1 Server main listener received shutdown signal. Stopping new connections.");
-                    break;
+                message = shutdown_rx_main.recv() => {
+                    match message {
+                        Ok(ShutdownMessage::ShutdownAll) => {
+                            info!("SV1 Server: Vardiff loop received shutdown signal. Exiting.");
+                            break;
+                        }
+                        Ok(ShutdownMessage::DownstreamShutdown(downstream_id)) => {
+                            let current_downstream = self.sv1_server_data.super_safe_lock(|d| d.downstreams.remove(&downstream_id));
+                            if current_downstream.is_some() {
+                                info!("Downstream: {downstream_id} removed from sv1 server downstreams");
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 result = listener.accept() => {
                     match result {
@@ -241,7 +253,6 @@ impl Sv1Server {
     }
 
     pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
-        info!("SV1 Server: Downstream message handler started.");
         match self
             .sv1_server_channel_state
             .downstream_to_sv1_server_receiver
@@ -320,7 +331,7 @@ impl Sv1Server {
     pub async fn handle_upstream_message(
         self: Arc<Self>,
         first_target: Target,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
     ) -> Result<(), TproxyError> {
@@ -469,16 +480,27 @@ impl Sv1Server {
     /// Every 60 seconds, this method updates the difficulty state for each downstream.
     async fn spawn_vardiff_loop(
         self: Arc<Self>,
-        mut notify_shutdown: broadcast::Receiver<()>,
+        mut notify_shutdown: broadcast::Receiver<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) {
         info!("Spawning vardiff adjustment loop for SV1 server");
 
         'vardiff_loop: loop {
             tokio::select! {
-                _ = notify_shutdown.recv() => {
-                    info!("SV1 Server: Vardiff loop received shutdown signal. Exiting.");
-                    break 'vardiff_loop;
+                message = notify_shutdown.recv() => {
+                    match message {
+                        Ok(ShutdownMessage::ShutdownAll) => {
+                            info!("SV1 Server: Vardiff loop received shutdown signal. Exiting.");
+                            break 'vardiff_loop;
+                        }
+                        Ok(ShutdownMessage::DownstreamShutdown(downstream_id)) => {
+                            let current_downstream = self.sv1_server_data.super_safe_lock(|d| d.downstreams.remove(&downstream_id));
+                            if current_downstream.is_some() {
+                                info!("Downstream: {downstream_id} removed from sv1 server downstreams");
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 _ = time::sleep(Duration::from_secs(60)) => {
                     info!("Starting vardiff updates for SV1 server");

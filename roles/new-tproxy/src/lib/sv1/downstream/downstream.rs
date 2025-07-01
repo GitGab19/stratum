@@ -3,7 +3,7 @@ use crate::{
     error::TproxyError,
     handle_status_result,
     status::{handle_error, StatusSender},
-    utils::validate_sv1_share,
+    utils::{validate_sv1_share, ShutdownMessage},
 };
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{
@@ -145,7 +145,7 @@ impl Downstream {
 
     pub fn run_downstream_tasks(
         self: Arc<Self>,
-        notify_shutdown: broadcast::Sender<()>,
+        notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: StatusSender,
     ) {
@@ -158,9 +158,21 @@ impl Downstream {
                     .sv1_server_receiver
                     .subscribe();
                 tokio::select! {
-                    _ = shutdown_rx.recv() => {
-                        info!("Downstream: received shutdown signal");
-                        break;
+                    message = shutdown_rx.recv() => {
+                        match message {
+                            Ok(ShutdownMessage::ShutdownAll) => {
+                                info!("Downstream: received shutdown signal");
+                                break;
+                            }
+                            Ok(ShutdownMessage::DownstreamShutdown(downstream_id)) => {
+                                let current_downstream_id = self.downstream_data.super_safe_lock(|d| d.downstream_id);
+                                if current_downstream_id == downstream_id {
+                                    info!("Downstream: received shutdown signal for downstream: {downstream_id}");
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     res = Self::handle_downstream_message(self.clone()) => {
                         if let Err(e) = res {
