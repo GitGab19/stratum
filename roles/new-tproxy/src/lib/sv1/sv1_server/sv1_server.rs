@@ -282,22 +282,23 @@ impl Sv1Server {
                         shutdown_complete_tx,
                         status_sender,
                     );
+
+                    // this is done to make sure that the job is sent after the initial handshake (subscribe, authorize, etc.) is done
+                    time::sleep(Duration::from_secs(1)).await;
+                    let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
+                        TproxyError::General("Failed to generate set_difficulty".into())
+                    })?;
+                    // send the set_difficulty message to the downstream
+                    self.sv1_server_channel_state
+                        .sv1_server_to_downstream_sender
+                        .send((m.channel_id, None, set_difficulty.into()))
+                        .map_err(|_| TproxyError::ChannelErrorSender)?;
                 } else {
                     error!("Downstream not found for downstream_id: {}", downstream_id);
                 }
             }
 
             Mining::NewExtendedMiningJob(m) => {
-                if m.job_id == 1 {
-                    let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
-                        TproxyError::General("Failed to generate set_difficulty".into())
-                    })?;
-                    self.sv1_server_channel_state
-                        .sv1_server_to_downstream_sender
-                        .send((m.channel_id, None, set_difficulty.into()))
-                        .map_err(|_| TproxyError::ChannelErrorSender)?;
-                }
-
                 if let Some(prevhash) = self.sv1_server_data.super_safe_lock(|v| v.prevhash.clone())
                 {
                     let notify = create_notify(
@@ -417,11 +418,10 @@ impl Sv1Server {
                     }
                 }
                 _ = time::sleep(Duration::from_secs(60)) => {
-                    info!("Starting vardiff updates for SV1 server");
                     let vardiff_map = self.sv1_server_data.super_safe_lock(|v| v.vardiff.clone());
                     let mut updates = Vec::new();
                     for (downstream_id, vardiff_state) in vardiff_map.iter() {
-                        info!("Updating vardiff for downstream_id: {}", downstream_id);
+                        debug!("Updating vardiff for downstream_id: {}", downstream_id);
                         let mut vardiff = vardiff_state.write().unwrap();
                         // Get hashrate and target from downstreams
                         let Some((channel_id, hashrate, target)) = self.sv1_server_data.super_safe_lock(|data| {

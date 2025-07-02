@@ -306,7 +306,7 @@ impl Upstream {
                     result = self.upstream_channel_state.channel_manager_receiver.recv() => {
                         match result {
                             Ok(msg) => {
-                                debug!("Upstream: sending message from channel manager.");
+                                info!("Upstream: sending message from channel manager.");
                                 if let Err(e) = self.send_upstream(msg).await {
                                     error!("Upstream: failed to send message: {e:?}");
                                     handle_error(&status_sender, TproxyError::ChannelErrorSender).await;

@@ -208,7 +208,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
         &mut self,
         m: NewExtendedMiningJob,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
-        let m_static = m.clone().into_static();
+        let mut m_static = m.clone().into_static();
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
                 let mut upstream_extended_channel = self
@@ -218,6 +218,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
                     .write()
                     .unwrap();
                 upstream_extended_channel.on_new_extended_mining_job(m_static.clone());
+                m_static.channel_id = 0; // this is done so that every aggregated downstream will receive the NewExtendedMiningJob message
             }
             self.extended_channels.iter().for_each(|(_, channel)| {
                 let mut channel = channel.write().unwrap();

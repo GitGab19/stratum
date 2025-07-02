@@ -129,7 +129,7 @@ impl Downstream {
                     .downstream_data
                     .super_safe_lock(|d| (d.channel_id, d.downstream_id));
 
-                let id_matches = my_channel_id == Some(channel_id)
+                let id_matches = (my_channel_id == Some(channel_id) || channel_id == 0)
                     && (downstream_id.is_none() || downstream_id == Some(my_downstream_id));
 
                 if !id_matches {
@@ -139,7 +139,7 @@ impl Downstream {
                 if let Message::Notification(notification) = &message {
                     match notification.method.as_str() {
                         "mining.set_difficulty" => {
-                            debug!("Down: Received set_difficulty notification, storing for next notify");
+                            info!("Down: Received set_difficulty notification, storing for next notify");
                             self.downstream_data.super_safe_lock(|d| {
                                 d.pending_set_difficulty = Some(message.clone());
                             });
@@ -151,7 +151,7 @@ impl Downstream {
                                 .super_safe_lock(|d| d.pending_set_difficulty.clone());
 
                             if let Some(set_difficulty_msg) = &pending_set_difficulty {
-                                debug!("Down: Sending pending set_difficulty before notify");
+                                info!("Down: Sending pending set_difficulty before notify");
                                 self.downstream_channel_state
                                     .downstream_sv1_sender
                                     .send(set_difficulty_msg.clone())
@@ -225,24 +225,6 @@ impl Downstream {
                         error!("Failed to send message to downstream: {:?}", e);
                         TproxyError::ChannelErrorSender
                     })?;
-
-                // Post-send updates for set_difficulty
-                if let Message::Notification(notification) = &message {
-                    if notification.method == "mining.set_difficulty" {
-                        self.downstream_data.super_safe_lock(|d| {
-                            if let Some(new_target) = d.pending_target.take() {
-                                d.target = new_target;
-                            }
-                            if let Some(new_hashrate) = d.pending_hashrate.take() {
-                                d.hashrate = new_hashrate;
-                            }
-                            debug!(
-                                "Downstream {}: Updated target and hashrate after direct set_difficulty",
-                                d.downstream_id
-                            );
-                        });
-                    }
-                }
             }
             Err(e) => {
                 let downstream_id = self.downstream_data.super_safe_lock(|d| d.downstream_id);
