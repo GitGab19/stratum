@@ -1,3 +1,5 @@
+pub(super) mod channel;
+pub(super) mod data;
 pub mod downstream;
 mod message_handler;
 
