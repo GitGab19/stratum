@@ -2,11 +2,7 @@ use crate::sv1::downstream::DownstreamMessages;
 use async_channel::Sender;
 use roles_logic_sv2::mining_sv2::Target;
 use tracing::debug;
-use v1::{
-    json_rpc,
-    server_to_client,
-    utils::HexU32Be,
-};
+use v1::{json_rpc, server_to_client, utils::HexU32Be};
 
 #[derive(Debug, Clone)]
 pub struct DownstreamData {

@@ -23,6 +23,8 @@ use v1::server_to_client::{Notify, SetDifficulty};
 pub enum TproxyError {
     VecToSlice32(Vec<u8>),
     SV1Error,
+    NetworkHelpersError(network_helpers_sv2::Error),
+    RolesSv2LogicError(roles_logic_sv2::Error),
     /// Errors on bad CLI argument input.
     BadCliArgs,
     /// Errors on bad `serde_json` serialize/deserialize.
@@ -107,6 +109,8 @@ impl fmt::Display for TproxyError {
             InvalidMerkleRoot => write!(f, "Invalid merkle root during share validation"),
             Shutdown => write!(f, "Shutdown signal"),
             SV1Error => write!(f, "Sv1 error"),
+            NetworkHelpersError(ref e) => write!(f, "Network helpers error: {e:?}"),
+            RolesSv2LogicError(ref e) => write!(f, "Roles logic error: {e:?}"),
         }
     }
 }
@@ -187,5 +191,11 @@ impl From<SetDifficulty> for TproxyError {
 impl<'a> From<v1::error::Error<'a>> for TproxyError {
     fn from(value: v1::error::Error<'a>) -> Self {
         TproxyError::SV1Error
+    }
+}
+
+impl From<network_helpers_sv2::Error> for TproxyError {
+    fn from(value: network_helpers_sv2::Error) -> Self {
+        TproxyError::NetworkHelpersError(value)
     }
 }
