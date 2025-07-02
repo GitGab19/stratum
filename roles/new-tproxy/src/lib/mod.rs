@@ -29,7 +29,6 @@ use crate::{
 
 pub mod config;
 pub mod error;
-pub mod handle_result;
 pub mod status;
 pub mod sv1;
 pub mod sv2;
