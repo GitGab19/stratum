@@ -1,9 +1,7 @@
 use roles_logic_sv2::common_properties::{IsDownstream, IsMiningDownstream};
 use tracing::{debug, error, info};
 use v1::{
-    client_to_server,
-    json_rpc,
-    server_to_client,
+    client_to_server, json_rpc, server_to_client,
     utils::{Extranonce, HexU32Be},
     IsServer,
 };

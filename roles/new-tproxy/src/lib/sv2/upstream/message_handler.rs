@@ -1,4 +1,4 @@
-use crate::sv2::upstream::upstream::{Upstream, UpstreamData};
+use crate::sv2::upstream::data::UpstreamData;
 use roles_logic_sv2::{
     common_messages_sv2::{
         ChannelEndpointChanged, Reconnect, SetupConnectionError, SetupConnectionSuccess,

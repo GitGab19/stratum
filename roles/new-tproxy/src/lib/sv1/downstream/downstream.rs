@@ -6,17 +6,13 @@ use crate::{
     utils::ShutdownMessage,
 };
 use async_channel::{Receiver, Sender};
-use roles_logic_sv2::{
-    mining_sv2::Target,
-    utils::Mutex,
-};
+use roles_logic_sv2::{mining_sv2::Target, utils::Mutex};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use v1::{
     json_rpc::{self, Message},
-    server_to_client,
-    IsServer,
+    server_to_client, IsServer,
 };
 
 #[derive(Debug, Clone)]
