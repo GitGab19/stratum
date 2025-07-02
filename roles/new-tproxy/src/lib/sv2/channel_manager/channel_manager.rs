@@ -19,7 +19,7 @@ use roles_logic_sv2::{
     parsers::{AnyMessage, Mining},
     utils::Mutex,
 };
-use std::sync::{Arc, RwLock};
+use std::{sync::{Arc, RwLock}, time::Duration};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
@@ -179,13 +179,14 @@ impl ChannelManager {
                                     .channel_manager_data
                                     .super_safe_lock(|c| c.mode.clone());
 
-                                let active_job = if mode == ChannelMode::Aggregated {
+                                let active_job = if mode == ChannelMode::Aggregated {   
                                     self.channel_manager_data.super_safe_lock(|c| {
                                         c.upstream_extended_channel
                                             .as_ref()
                                             .and_then(|ch| ch.read().ok())
                                             .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
                                     })
+
                                 } else {
                                     self.channel_manager_data.super_safe_lock(|c| {
                                         c.extended_channels
@@ -211,7 +212,7 @@ impl ChannelManager {
                                 if !job.is_future() {
                                     self.channel_state
                                         .sv1_server_sender
-                                        .send(NewExtendedMiningJob(job.clone()))
+                                        .send(NewExtendedMiningJob(job))
                                         .await
                                         .map_err(|e| {
                                             error!("Failed to send immediate NewExtendedMiningJob: {:?}", e);
@@ -267,7 +268,6 @@ impl ChannelManager {
             .recv()
             .await
             .map_err(TproxyError::ChannelErrorReceiver)?;
-
         match message {
             Mining::SubmitSharesExtended(mut m) => {
                 let value = self.channel_manager_data.super_safe_lock(|c| {
@@ -350,6 +350,7 @@ impl ChannelManager {
                 }
             }
             Mining::OpenExtendedMiningChannel(m) => {
+                info!("DOWNSTREAM-to-UPSTREAM: OpenExtendedMiningChannel: {:?}", m);
                 let mut open_channel_msg = m.clone();
                 let mut user_identity = std::str::from_utf8(m.user_identity.as_ref())
                     .map(|s| s.to_string())
@@ -361,6 +362,7 @@ impl ChannelManager {
                     .super_safe_lock(|c| c.mode.clone());
 
                 if mode == ChannelMode::Aggregated {
+                    info!("Aggregated mode");
                     if self
                         .channel_manager_data
                         .super_safe_lock(|c| c.upstream_extended_channel.is_some())
@@ -444,6 +446,33 @@ impl ChannelManager {
                                         );
                                         TproxyError::ChannelErrorSender
                                     })?;
+                                // send the last active job to the sv1 server
+                                let last_active_job = self.channel_manager_data.super_safe_lock(|c| {
+                                    c.upstream_extended_channel
+                                        .as_ref()
+                                        .and_then(|ch| ch.read().ok())
+                                        .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
+                                });
+
+                                if let Some(mut job) = last_active_job {
+                                    job.channel_id = next_channel_id;
+                                    self.channel_manager_data.super_safe_lock(|c| {
+                                        if let Some(ch) = c.extended_channels.get(&next_channel_id) {
+                                            ch.write().unwrap().on_new_extended_mining_job(job.clone());
+                                        }
+                                    });
+                                    info!("job: {:?}", job);
+                                    // this is done to make sure that the job is sent after the initial handshake (subscribe, authorize, etc.) is done
+                                    tokio::time::sleep(Duration::from_secs(2)).await;
+                                    self.channel_state
+                                        .sv1_server_sender
+                                        .send(Mining::NewExtendedMiningJob(job.clone()))
+                                        .await
+                                        .map_err(|e| {
+                                            error!("Failed to send last new extended mining job to upstream: {:?}", e);
+                                            TproxyError::ChannelErrorSender
+                                        })?;
+                                }
                             }
                         }
                         return Ok(());
@@ -463,7 +492,7 @@ impl ChannelManager {
                             user_identity.as_bytes().to_vec().try_into().unwrap();
                     }
                 }
-
+                info!("YESSSSS");
                 // Store the user identity and hashrate
                 self.channel_manager_data.super_safe_lock(|c| {
                     c.pending_channels.insert(
@@ -476,7 +505,7 @@ impl ChannelManager {
                     roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_channel_msg),
                 ))
                 .map_err(TproxyError::RolesSv2LogicError)?;
-
+                info!("\n\n\nframe sent to upstream: {:?}", frame);
                 self.channel_state
                     .upstream_sender
                     .send(frame.into())

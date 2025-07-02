@@ -100,7 +100,7 @@ impl TranslatorSv2 {
             upstream_to_channel_manager_receiver,
             channel_manager_to_sv1_server_sender.clone(),
             sv1_server_to_channel_manager_receiver,
-            if !self.config.aggregate_channels {
+            if self.config.aggregate_channels {
                 ChannelMode::Aggregated
             } else {
                 ChannelMode::NonAggregated
