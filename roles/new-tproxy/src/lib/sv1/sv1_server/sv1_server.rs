@@ -4,17 +4,17 @@ use crate::{
     status::{handle_error, Status, StatusSender},
     sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
+        sv1_server::{channel::Sv1ServerChannelState, data::Sv1ServerData},
         translation_utils::{create_notify, get_set_difficulty},
     },
     utils::ShutdownMessage,
 };
-use async_channel::{unbounded, Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
 use roles_logic_sv2::{
-    bitcoin::secp256k1::Message,
-    mining_sv2::{SetNewPrevHash, SubmitSharesExtended, Target},
+    mining_sv2::{SubmitSharesExtended, Target},
     parsers::Mining,
-    utils::{hash_rate_to_target, Id as IdFactory, Mutex},
+    utils::{hash_rate_to_target, Mutex},
     vardiff::classic::VardiffState,
     Vardiff,
 };
@@ -33,70 +33,6 @@ use tokio::{
     time,
 };
 use tracing::{debug, error, info, warn};
-use v1::{
-    client_to_server,
-    error::Error,
-    json_rpc, server_to_client,
-    utils::{Extranonce, HexU32Be},
-    IsServer,
-};
-
-struct Sv1ServerChannelState {
-    sv1_server_to_downstream_sender: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>,
-    sv1_server_to_downstream_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
-    downstream_to_sv1_server_sender: Sender<DownstreamMessages>,
-    downstream_to_sv1_server_receiver: Receiver<DownstreamMessages>,
-    channel_manager_receiver: Receiver<Mining<'static>>,
-    channel_manager_sender: Sender<Mining<'static>>,
-}
-
-impl Sv1ServerChannelState {
-    fn new(
-        channel_manager_receiver: Receiver<Mining<'static>>,
-        channel_manager_sender: Sender<Mining<'static>>,
-    ) -> Self {
-        let (sv1_server_to_downstream_sender, sv1_server_to_downstream_receiver) =
-            broadcast::channel(10);
-        // mpsc - sender is only clonable and receiver are not..
-        let (downstream_to_sv1_server_sender, downstream_to_sv1_server_receiver) = unbounded();
-
-        Self {
-            sv1_server_to_downstream_sender,
-            sv1_server_to_downstream_receiver,
-            downstream_to_sv1_server_receiver,
-            downstream_to_sv1_server_sender,
-            channel_manager_receiver,
-            channel_manager_sender,
-        }
-    }
-
-    pub fn drop(&self) {
-        self.channel_manager_receiver.close();
-        self.channel_manager_sender.close();
-        self.downstream_to_sv1_server_receiver.close();
-        self.downstream_to_sv1_server_sender.close();
-        self.channel_manager_receiver.close();
-        self.channel_manager_sender.close();
-    }
-}
-
-struct Sv1ServerData {
-    downstreams: HashMap<u32, Downstream>,
-    vardiff: HashMap<u32, Arc<RwLock<VardiffState>>>,
-    prevhash: Option<SetNewPrevHash<'static>>,
-    downstream_id_factory: IdFactory,
-}
-
-impl Sv1ServerData {
-    fn new() -> Self {
-        Self {
-            downstreams: HashMap::new(),
-            vardiff: HashMap::new(),
-            prevhash: None,
-            downstream_id_factory: IdFactory::new(),
-        }
-    }
-}
 
 pub struct Sv1Server {
     sv1_server_channel_state: Sv1ServerChannelState,
@@ -193,7 +129,7 @@ impl Sv1Server {
 
                             let connection = ConnectionSV1::new(stream).await;
                             let downstream_id = self.sv1_server_data.super_safe_lock(|v| v.downstream_id_factory.next());
-                            let mut downstream = Downstream::new(
+                            let downstream = Downstream::new(
                                 downstream_id,
                                 connection.sender().clone(),
                                 connection.receiver().clone(),
@@ -214,8 +150,8 @@ impl Sv1Server {
                                 });
                             info!("Downstream {} registered successfully", downstream_id);
 
-                            let channel_id = self
-                                .open_extended_mining_channel(connection, downstream)
+                            self
+                                .open_extended_mining_channel(downstream)
                                 .await?;
                         }
                         Err(e) => {
@@ -227,7 +163,7 @@ impl Sv1Server {
                     Arc::clone(&self)
                 ) => {
                     if let Err(e) = res {
-                        handle_error(&sv1_status_sender, e);
+                        handle_error(&sv1_status_sender, e).await;
                         break;
                     }
                 }
@@ -239,7 +175,7 @@ impl Sv1Server {
                     status_sender.clone()
                 ) => {
                     if let Err(e) = res {
-                        handle_error(&sv1_status_sender, e);
+                        handle_error(&sv1_status_sender, e).await;
                         break;
                     }
                 }
@@ -252,78 +188,59 @@ impl Sv1Server {
     }
 
     pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
-        match self
+        let downstream_message = self
             .sv1_server_channel_state
             .downstream_to_sv1_server_receiver
             .recv()
             .await
-        {
-            Ok(downstream_message) => {
-                match downstream_message {
-                    DownstreamMessages::SubmitShares(message) => {
-                        // Increment vardiff counter for this downstream
-                        self.sv1_server_data.safe_lock(|v| {
-                            if let Some(vardiff_state) = v.vardiff.get(&message.downstream_id) {
-                                vardiff_state
-                                    .write()
-                                    .unwrap()
-                                    .increment_shares_since_last_update();
-                            }
-                        });
+            .map_err(TproxyError::ChannelErrorReceiver)?;
 
-                        // For version masking see https://github.com/slushpool/stratumprotocol/blob/master/stratum-extensions.mediawiki#changes-in-request-miningsubmit
-                        // when better error handling is there, uncomment this
-                        // let last_job_version =
-                        //     message
-                        //         .last_job_version
-                        //         .ok_or(crate::error::TproxyError::RolesSv2Logic(
-                        //             roles_logic_sv2::errors::Error::NoValidJob,
-                        //         ))?;
-                        let last_job_version = message
-                            .last_job_version
-                            .ok_or(crate::error::TproxyError::General(format!("No valid job")))?;
-                        let version =
-                            match (message.share.version_bits, message.version_rolling_mask) {
-                                (Some(version_bits), Some(rolling_mask)) => {
-                                    (last_job_version & !rolling_mask.0)
-                                        | (version_bits.0 & rolling_mask.0)
-                                }
-                                (None, None) => last_job_version,
-                                _ => {
-                                    // We are not handling error yet
-                                    return Err(crate::error::TproxyError::General(format!(
-                                        "Invalid submission Error"
-                                    )));
-                                    // return Err(crate::error::TproxyError::V1Protocol(
-                                    //     v1::error::Error::InvalidSubmission,
-                                    // ))
-                                }
-                            };
-                        let extranonce: Vec<u8> = message.share.extra_nonce2.into();
+        let DownstreamMessages::SubmitShares(message) = downstream_message;
 
-                        let submit_share_extended = SubmitSharesExtended {
-                            channel_id: message.channel_id,
-                            sequence_number: self.sequence_counter.load(Ordering::SeqCst),
-                            job_id: message.share.job_id.parse::<u32>()?,
-                            nonce: message.share.nonce.0,
-                            ntime: message.share.time.0,
-                            version: version,
-                            extranonce: extranonce.try_into()?,
-                        };
-                        // send message to channel manager for validation with channel target
-                        self.sv1_server_channel_state
-                            .channel_manager_sender
-                            .send(Mining::SubmitSharesExtended(submit_share_extended))
-                            .await;
-                        self.sequence_counter.fetch_add(1, Ordering::SeqCst);
-                    }
-                }
+        // Increment vardiff counter for this downstream
+        self.sv1_server_data.safe_lock(|v| {
+            if let Some(vardiff_state) = v.vardiff.get(&message.downstream_id) {
+                vardiff_state
+                    .write()
+                    .unwrap()
+                    .increment_shares_since_last_update();
             }
-            Err(e) => {
-                error!("SV1 Server Downstream message received closed: {:?}", e);
-                return Err(TproxyError::ChannelErrorReceiver(e));
+        })?;
+
+        let last_job_version = message.last_job_version.ok_or_else(|| {
+            TproxyError::RolesSv2LogicError(roles_logic_sv2::errors::Error::NoValidJob)
+        })?;
+
+        let version = match (message.share.version_bits, message.version_rolling_mask) {
+            (Some(version_bits), Some(rolling_mask)) => {
+                (last_job_version & !rolling_mask.0) | (version_bits.0 & rolling_mask.0)
             }
-        }
+            (None, None) => last_job_version,
+            _ => return Err(TproxyError::SV1Error),
+        };
+
+        let extranonce: Vec<u8> = message.share.extra_nonce2.into();
+
+        let submit_share_extended = SubmitSharesExtended {
+            channel_id: message.channel_id,
+            sequence_number: self.sequence_counter.load(Ordering::SeqCst),
+            job_id: message.share.job_id.parse::<u32>()?,
+            nonce: message.share.nonce.0,
+            ntime: message.share.time.0,
+            version,
+            extranonce: extranonce
+                .try_into()
+                .map_err(|_| TproxyError::General("Invalid extranonce length".into()))?,
+        };
+
+        self.sv1_server_channel_state
+            .channel_manager_sender
+            .send(Mining::SubmitSharesExtended(submit_share_extended))
+            .await
+            .map_err(|_| TproxyError::ChannelErrorSender)?;
+
+        self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+
         Ok(())
     }
 
@@ -334,116 +251,113 @@ impl Sv1Server {
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
     ) -> Result<(), TproxyError> {
-        match self
+        let message = self
             .sv1_server_channel_state
             .channel_manager_receiver
             .recv()
             .await
-        {
-            Ok(message) => {
-                match message {
-                    Mining::OpenExtendedMiningChannelSuccess(m) => {
-                        let downstream_id = m.request_id;
-                        let downstreams = self
-                            .sv1_server_data
-                            .super_safe_lock(|v| v.downstreams.clone());
-                        let downstream = Self::get_downstream(downstream_id, downstreams);
-                        if let Some(downstream) = downstream {
-                            downstream.downstream_data.safe_lock(|d| {
-                                d.extranonce1 = m.extranonce_prefix.to_vec();
-                                d.extranonce2_len = m.extranonce_size.into();
-                                d.channel_id = Some(m.channel_id);
-                            });
-                            let downstream_id = downstream
-                                .downstream_data
-                                .super_safe_lock(|d| d.downstream_id);
-                            let status_sender = StatusSender::Downstream {
-                                downstream_id,
-                                tx: status_sender.clone(),
-                            };
-                            Downstream::run_downstream_tasks(
-                                Arc::new(downstream),
-                                notify_shutdown.clone(),
-                                shutdown_complete_tx.clone(),
-                                status_sender,
-                            );
-                        } else {
-                            error!("Downstream not found for downstream id: {}", downstream_id);
-                        }
-                    }
-                    Mining::NewExtendedMiningJob(m) => {
-                        // if it's the first job, send the set difficulty
-                        if m.job_id == 1 {
-                            let set_difficulty = get_set_difficulty(first_target.clone()).unwrap();
-                            self.sv1_server_channel_state
-                                .sv1_server_to_downstream_sender
-                                .send((m.channel_id, None, set_difficulty.into()));
-                        }
-                        let prevhash = self.sv1_server_data.super_safe_lock(|x| x.prevhash.clone());
-                        if let Some(prevhash) = prevhash {
-                            let notify = create_notify(
-                                prevhash,
-                                m.clone().into_static(),
-                                self.clean_job.load(Ordering::SeqCst),
-                            );
-                            self.clean_job.store(false, Ordering::SeqCst);
-                            let _ = self
-                                .sv1_server_channel_state
-                                .sv1_server_to_downstream_sender
-                                .send((m.channel_id, None, notify.into()));
-                        }
-                    }
-                    Mining::SetNewPrevHash(m) => {
-                        self.clean_job.store(true, Ordering::SeqCst);
-                        self.sv1_server_data
-                            .super_safe_lock(|d| d.prevhash = Some(m.clone().into_static()));
-                    }
-                    Mining::CloseChannel(m) => {
-                        todo!()
-                    }
-                    Mining::OpenMiningChannelError(m) => {
-                        todo!()
-                    }
-                    Mining::UpdateChannelError(m) => {
-                        todo!()
-                    }
-                    _ => unreachable!(),
+            .map_err(TproxyError::ChannelErrorReceiver)?;
+
+        match message {
+            Mining::OpenExtendedMiningChannelSuccess(m) => {
+                let downstream_id = m.request_id;
+                let downstreams = self
+                    .sv1_server_data
+                    .super_safe_lock(|v| v.downstreams.clone());
+                if let Some(downstream) = Self::get_downstream(downstream_id, downstreams) {
+                    downstream.downstream_data.safe_lock(|d| {
+                        d.extranonce1 = m.extranonce_prefix.to_vec();
+                        d.extranonce2_len = m.extranonce_size.into();
+                        d.channel_id = Some(m.channel_id);
+                    })?;
+
+                    let status_sender = StatusSender::Downstream {
+                        downstream_id,
+                        tx: status_sender.clone(),
+                    };
+
+                    Downstream::run_downstream_tasks(
+                        Arc::new(downstream),
+                        notify_shutdown,
+                        shutdown_complete_tx,
+                        status_sender,
+                    );
+                } else {
+                    error!("Downstream not found for downstream_id: {}", downstream_id);
                 }
             }
-            Err(e) => {
-                error!("SV1 Server ChannelManager receiver closed: {:?}", e);
-                return Err(TproxyError::ChannelErrorReceiver(e));
+
+            Mining::NewExtendedMiningJob(m) => {
+                if m.job_id == 1 {
+                    let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
+                        TproxyError::General("Failed to generate set_difficulty".into())
+                    })?;
+                    self.sv1_server_channel_state
+                        .sv1_server_to_downstream_sender
+                        .send((m.channel_id, None, set_difficulty.into()))
+                        .map_err(|_| TproxyError::ChannelErrorSender)?;
+                }
+
+                if let Some(prevhash) = self.sv1_server_data.super_safe_lock(|v| v.prevhash.clone())
+                {
+                    let notify = create_notify(
+                        prevhash,
+                        m.clone().into_static(),
+                        self.clean_job.load(Ordering::SeqCst),
+                    );
+                    self.clean_job.store(false, Ordering::SeqCst);
+                    let _ = self
+                        .sv1_server_channel_state
+                        .sv1_server_to_downstream_sender
+                        .send((m.channel_id, None, notify.into()));
+                }
             }
+
+            Mining::SetNewPrevHash(m) => {
+                self.clean_job.store(true, Ordering::SeqCst);
+                self.sv1_server_data
+                    .super_safe_lock(|v| v.prevhash = Some(m.clone().into_static()));
+            }
+
+            Mining::CloseChannel(_) => {
+                todo!("Handle CloseChannel message from upstream");
+            }
+
+            Mining::OpenMiningChannelError(_) => {
+                todo!("Handle OpenMiningChannelError message from upstream");
+            }
+
+            Mining::UpdateChannelError(_) => {
+                todo!("Handle UpdateChannelError message from upstream");
+            }
+
+            _ => unreachable!("Unexpected message type received from upstream"),
         }
+
         Ok(())
     }
 
     pub async fn open_extended_mining_channel(
         &self,
-        connection: ConnectionSV1,
         downstream: Downstream,
-    ) -> Result<Option<u32>, TproxyError> {
-        let hashrate = self
-            .config
-            .downstream_difficulty_config
-            .min_individual_miner_hashrate as f64;
-        let share_per_min: f64 = self.config.downstream_difficulty_config.shares_per_minute as f64;
+    ) -> Result<(), TproxyError> {
+        let config = &self.config.downstream_difficulty_config;
+
+        let hashrate = config.min_individual_miner_hashrate as f64;
+        let shares_per_min = config.shares_per_minute as f64;
         let min_extranonce_size = self.config.min_extranonce2_size;
-        let initial_target: Target = hash_rate_to_target(hashrate, share_per_min).unwrap().into();
 
-        // Get the next miner counter and create unique user identity
-        self.miner_counter.fetch_add(1, Ordering::SeqCst);
-        let user_identity = format!(
-            "{}.miner{}",
-            self.config.user_identity,
-            self.miner_counter.load(Ordering::SeqCst)
-        );
+        let initial_target: Target = hash_rate_to_target(hashrate, shares_per_min)
+            .unwrap()
+            .into();
 
-        downstream.downstream_data.safe_lock(|d| {
-            d.user_identity = user_identity.clone();
-        });
+        let miner_id = self.miner_counter.fetch_add(1, Ordering::SeqCst) + 1;
+        let user_identity = format!("{}.miner{}", self.config.user_identity, miner_id);
 
-        // Create OpenExtendedMiningChannel message with the unique user identity
+        downstream
+            .downstream_data
+            .safe_lock(|d| d.user_identity = user_identity.clone())?;
+
         let open_channel_msg = roles_logic_sv2::mining_sv2::OpenExtendedMiningChannel {
             request_id: downstream
                 .downstream_data
@@ -451,16 +365,16 @@ impl Sv1Server {
             user_identity: user_identity.try_into()?,
             nominal_hash_rate: hashrate as f32,
             max_target: initial_target.into(),
-            min_extranonce_size: min_extranonce_size,
+            min_extranonce_size,
         };
 
-        let open_upstream_channel = self
-            .sv1_server_channel_state
+        self.sv1_server_channel_state
             .channel_manager_sender
             .send(Mining::OpenExtendedMiningChannel(open_channel_msg))
-            .await;
+            .await
+            .map_err(|_| TproxyError::ChannelErrorSender)?;
 
-        Ok(None)
+        Ok(())
     }
 
     pub fn get_downstream(
@@ -471,8 +385,9 @@ impl Sv1Server {
     }
 
     pub fn get_downstream_id(downstream: Downstream) -> u32 {
-        let id = downstream.downstream_data.safe_lock(|s| s.downstream_id);
-        return id.unwrap();
+        downstream
+            .downstream_data
+            .super_safe_lock(|s| s.downstream_id)
     }
 
     /// This method implements the SV1 server's variable difficulty logic for all downstreams.
@@ -532,9 +447,9 @@ impl Sv1Server {
                                     .into();
 
                             // Update the downstream's pending target and hashrate
-                            self.sv1_server_data.safe_lock(|dmap| {
+                            _ = self.sv1_server_data.safe_lock(|dmap| {
                                 if let Some(d) = dmap.downstreams.get(downstream_id) {
-                                    d.downstream_data.safe_lock(|d| {
+                                    _ = d.downstream_data.safe_lock(|d| {
                                         d.set_pending_target_and_hashrate(new_target.clone(), new_hashrate);
                                     });
                                 }
