@@ -1,4 +1,4 @@
-use crate::sv2::upstream::upstream::Upstream;
+use crate::sv2::upstream::data::UpstreamData;
 use roles_logic_sv2::{
     common_messages_sv2::{
         ChannelEndpointChanged, Reconnect, SetupConnectionError, SetupConnectionSuccess,
@@ -8,7 +8,7 @@ use roles_logic_sv2::{
 };
 use tracing::info;
 
-impl ParseCommonMessagesFromUpstream for Upstream {
+impl ParseCommonMessagesFromUpstream for UpstreamData {
     fn handle_setup_connection_success(
         &mut self,
         m: SetupConnectionSuccess,

@@ -54,11 +54,7 @@ pub struct UpstreamConfig {
 
 impl UpstreamConfig {
     /// Creates a new `UpstreamConfig` instance.
-    pub fn new(
-        address: String,
-        port: u16,
-        authority_pubkey: Secp256k1PublicKey,
-    ) -> Self {
+    pub fn new(address: String, port: u16, authority_pubkey: Secp256k1PublicKey) -> Self {
         Self {
             address,
             port,

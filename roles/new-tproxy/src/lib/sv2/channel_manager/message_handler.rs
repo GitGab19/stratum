@@ -1,14 +1,24 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{sv1::downstream::Downstream, sv2::{ChannelManager, ChannelMode}, utils::proxy_extranonce_prefix_len};
+use crate::{
+    sv1::downstream::downstream::Downstream,
+    sv2::channel_manager::{data::ChannelManagerData, ChannelMode},
+    utils::proxy_extranonce_prefix_len,
+};
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel, common_properties::IsMiningUpstream, handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes}, mining_sv2::{
-        ExtendedExtranonce, Extranonce, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess, SetNewPrevHash, SetTarget, MAX_EXTRANONCE_LEN
-    }, parsers::Mining, utils::Mutex, Error as RolesLogicError
+    channels::client::extended::ExtendedChannel,
+    handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
+    mining_sv2::{
+        ExtendedExtranonce, Extranonce, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess,
+        SetNewPrevHash, SetTarget, MAX_EXTRANONCE_LEN,
+    },
+    parsers::Mining,
+    utils::Mutex,
+    Error as RolesLogicError,
 };
 
 use tracing::{debug, error, info, warn};
-impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
+impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
     fn get_channel_type(&self) -> roles_logic_sv2::handlers::mining::SupportedChannelTypes {
         SupportedChannelTypes::Extended
     }
@@ -19,7 +29,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
 
     fn handle_open_standard_mining_channel_success(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::OpenStandardMiningChannelSuccess,
+        _m: roles_logic_sv2::mining_sv2::OpenStandardMiningChannelSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!()
     }
@@ -52,26 +62,42 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
             m.extranonce_size,
         );
 
-        // If we are in aggregated mode, we need to create a new extranonce prefix and insert the extended channel into the map 
+        // If we are in aggregated mode, we need to create a new extranonce prefix and insert the
+        // extended channel into the map
         if self.mode == ChannelMode::Aggregated {
             self.upstream_extended_channel = Some(Arc::new(RwLock::new(extended_channel.clone())));
 
             let upstream_extranonce_prefix: Extranonce = m.extranonce_prefix.clone().into();
-            let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(m.extranonce_size.into(), downstream_extranonce_len.into());
+            let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(
+                m.extranonce_size.into(),
+                downstream_extranonce_len.into(),
+            );
             // range 0 is the extranonce1 from upstream
             // range 1 is the extranonce1 added by the tproxy
-            // range 2 is the extranonce2 used by the miner for rolling (this is the one that is used for rolling)
+            // range 2 is the extranonce2 used by the miner for rolling (this is the one that is
+            // used for rolling)
             let range_0 = 0..extranonce_prefix.len();
             let range1 = range_0.end..range_0.end + translator_proxy_extranonce_prefix_len;
             let range2 = range1.end..MAX_EXTRANONCE_LEN;
-            let extended_extranonce_factory = ExtendedExtranonce::from_upstream_extranonce(upstream_extranonce_prefix, range_0, range1, range2).unwrap();
-            self.extranonce_prefix_factory = Some(Arc::new(Mutex::new(extended_extranonce_factory)));
+            let extended_extranonce_factory = ExtendedExtranonce::from_upstream_extranonce(
+                upstream_extranonce_prefix,
+                range_0,
+                range1,
+                range2,
+            )
+            .unwrap();
+            self.extranonce_prefix_factory =
+                Some(Arc::new(Mutex::new(extended_extranonce_factory)));
 
             let factory = self.extranonce_prefix_factory.as_ref().unwrap();
             let new_extranonce_size = factory.safe_lock(|f| f.get_range2_len()).unwrap() as u16;
             if downstream_extranonce_len <= new_extranonce_size as usize {
-                let new_extranonce_prefix = factory.safe_lock(|f| f.next_prefix_extended(new_extranonce_size as usize)).unwrap().unwrap().into_b032();
-                let mut new_downstream_extended_channel = ExtendedChannel::new(
+                let new_extranonce_prefix = factory
+                    .safe_lock(|f| f.next_prefix_extended(new_extranonce_size as usize))
+                    .unwrap()
+                    .unwrap()
+                    .into_b032();
+                let new_downstream_extended_channel = ExtendedChannel::new(
                     m.channel_id,
                     user_identity.clone(),
                     new_extranonce_prefix.clone().into_static().to_vec(),
@@ -80,7 +106,10 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
                     true,
                     new_extranonce_size,
                 );
-                self.extended_channels.insert(m.channel_id, Arc::new(RwLock::new(new_downstream_extended_channel)));
+                self.extended_channels.insert(
+                    m.channel_id,
+                    Arc::new(RwLock::new(new_downstream_extended_channel)),
+                );
                 let new_open_extended_mining_channel_success = OpenExtendedMiningChannelSuccess {
                     request_id: m.request_id,
                     channel_id: m.channel_id,
@@ -88,7 +117,11 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
                     extranonce_size: new_extranonce_size,
                     target: m.target.clone(),
                 };
-                return Ok(SendTo::None(Some(Mining::OpenExtendedMiningChannelSuccess(new_open_extended_mining_channel_success.into_static()))));
+                return Ok(SendTo::None(Some(
+                    Mining::OpenExtendedMiningChannelSuccess(
+                        new_open_extended_mining_channel_success.into_static(),
+                    ),
+                )));
             }
         }
 
@@ -130,17 +163,17 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         info!("Received CloseChannel for channel id: {}", m.channel_id);
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
-                let mut upstream_extended_channel = self.upstream_extended_channel = None;
+                self.upstream_extended_channel = None;
             }
         } else {
-            self.extended_channels.remove(&m.channel_id);  
+            self.extended_channels.remove(&m.channel_id);
         }
         Ok(SendTo::None(None))
     }
 
     fn handle_set_extranonce_prefix(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::SetExtranoncePrefix,
+        _m: roles_logic_sv2::mining_sv2::SetExtranoncePrefix,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!("Cannot process SetExtranoncePrefix since set_extranonce is not supported for majority of sv1 clients");
     }
@@ -164,7 +197,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
 
     fn handle_new_mining_job(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::NewMiningJob,
+        _m: roles_logic_sv2::mining_sv2::NewMiningJob,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!(
             "Cannot process NewMiningJob since Translator Proxy supports only extended mining jobs"
@@ -178,7 +211,12 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         let m_static = m.clone().into_static();
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
-                let mut upstream_extended_channel = self.upstream_extended_channel.as_ref().unwrap().write().unwrap();
+                let mut upstream_extended_channel = self
+                    .upstream_extended_channel
+                    .as_ref()
+                    .unwrap()
+                    .write()
+                    .unwrap();
                 upstream_extended_channel.on_new_extended_mining_job(m_static.clone());
             }
             self.extended_channels.iter().for_each(|(_, channel)| {
@@ -201,17 +239,22 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
         let m_static = m.clone().into_static();
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
-                let mut upstream_extended_channel = self.upstream_extended_channel.as_ref().unwrap().write().unwrap();
-                upstream_extended_channel.on_set_new_prev_hash(m_static.clone());
+                let mut upstream_extended_channel = self
+                    .upstream_extended_channel
+                    .as_ref()
+                    .unwrap()
+                    .write()
+                    .unwrap();
+                _ = upstream_extended_channel.on_set_new_prev_hash(m_static.clone());
             }
             self.extended_channels.iter().for_each(|(_, channel)| {
                 let mut channel = channel.write().unwrap();
-                channel.on_set_new_prev_hash(m_static.clone());
+                _ = channel.on_set_new_prev_hash(m_static.clone());
             });
         } else {
             if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
                 let mut channel = channel.write().unwrap();
-                channel.on_set_new_prev_hash(m_static.clone());
+                _ = channel.on_set_new_prev_hash(m_static.clone());
             }
         }
         Ok(SendTo::None(Some(Mining::SetNewPrevHash(m_static))))
@@ -219,14 +262,14 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
 
     fn handle_set_custom_mining_job_success(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::SetCustomMiningJobSuccess,
+        _m: roles_logic_sv2::mining_sv2::SetCustomMiningJobSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!("Cannot process SetCustomMiningJobSuccess since Translator Proxy does not support custom mining jobs")
     }
 
     fn handle_set_custom_mining_job_error(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::SetCustomMiningJobError,
+        _m: roles_logic_sv2::mining_sv2::SetCustomMiningJobError,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         unreachable!("Cannot process SetCustomMiningJobError since Translator Proxy does not support custom mining jobs")
     }
@@ -234,7 +277,12 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManager {
     fn handle_set_target(&mut self, m: SetTarget) -> Result<SendTo<Downstream>, RolesLogicError> {
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
-                let mut upstream_extended_channel = self.upstream_extended_channel.as_ref().unwrap().write().unwrap();
+                let mut upstream_extended_channel = self
+                    .upstream_extended_channel
+                    .as_ref()
+                    .unwrap()
+                    .write()
+                    .unwrap();
                 upstream_extended_channel.set_target(m.maximum_target.clone().into());
             }
             self.extended_channels.iter().for_each(|(_, channel)| {
