@@ -8,16 +8,10 @@
 //! - A specific `ChannelSendError` enum for errors occurring during message sending over
 //!   asynchronous channels.
 
-use codec_sv2::Frame;
 use ext_config::ConfigError;
-use roles_logic_sv2::{
-    mining_sv2::{ExtendedExtranonce, NewExtendedMiningJob, SetCustomMiningJob},
-    parsers::{AnyMessage, Mining},
-    vardiff::error::VardiffError,
-};
 use std::{fmt, sync::PoisonError};
 use tokio::sync::broadcast;
-use v1::server_to_client::{Notify, SetDifficulty};
+use v1::server_to_client::SetDifficulty;
 
 #[derive(Debug)]
 pub enum TproxyError {
@@ -189,7 +183,7 @@ impl From<SetDifficulty> for TproxyError {
 }
 
 impl<'a> From<v1::error::Error<'a>> for TproxyError {
-    fn from(value: v1::error::Error<'a>) -> Self {
+    fn from(_: v1::error::Error<'a>) -> Self {
         TproxyError::SV1Error
     }
 }

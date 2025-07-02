@@ -10,11 +10,10 @@
 //! provides the `start` method as the main entry point for running the translator service.
 //! It relies on several sub-modules (`config`, `downstream_sv1`, `upstream_sv2`, `proxy`, `status`,
 //! etc.) for specialized functionalities.
-#![allow(warnings)]
 use async_channel::unbounded;
 pub use roles_logic_sv2::utils::Mutex;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 pub use v1::server_to_client;
@@ -97,26 +96,24 @@ impl TranslatorSv2 {
             }
         };
 
-        let channel_manager = Arc::new(
-            (ChannelManager::new(
-                channel_manager_to_upstream_sender,
-                upstream_to_channel_manager_receiver,
-                channel_manager_to_sv1_server_sender.clone(),
-                sv1_server_to_channel_manager_receiver,
-                if !self.config.aggregate_channels {
-                    ChannelMode::Aggregated
-                } else {
-                    ChannelMode::NonAggregated
-                },
-            )),
-        );
+        let channel_manager = Arc::new(ChannelManager::new(
+            channel_manager_to_upstream_sender,
+            upstream_to_channel_manager_receiver,
+            channel_manager_to_sv1_server_sender.clone(),
+            sv1_server_to_channel_manager_receiver,
+            if !self.config.aggregate_channels {
+                ChannelMode::Aggregated
+            } else {
+                ChannelMode::NonAggregated
+            },
+        ));
 
         let downstream_addr: SocketAddr = SocketAddr::new(
             self.config.downstream_address.parse().unwrap(),
             self.config.downstream_port,
         );
 
-        let mut sv1_server = Arc::new(Sv1Server::new(
+        let sv1_server = Arc::new(Sv1Server::new(
             downstream_addr,
             channel_manager_to_sv1_server_receiver,
             sv1_server_to_channel_manager_sender,
@@ -183,13 +180,17 @@ impl TranslatorSv2 {
             }
         });
 
-        Sv1Server::start(
+        if let Err(e) = Sv1Server::start(
             sv1_server,
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
             status_sender.clone(),
         )
-        .await;
+        .await
+        {
+            error!("Error starting sv1 server: {:?}", e);
+            notify_shutdown.send(ShutdownMessage::ShutdownAll).unwrap();
+        }
 
         drop(shutdown_complete_tx);
         info!("waiting for shutdown complete...");

@@ -3,16 +3,15 @@ use buffer_sv2::Slice;
 use codec_sv2::Frame;
 use roles_logic_sv2::{
     bitcoin::{
-        self,
         block::{Header, Version},
         hashes::Hash,
         CompactTarget, TxMerkleNode,
     },
     mining_sv2::Target,
     parsers::{AnyMessage, CommonMessages},
-    utils::{bytes_to_hex, merkle_root_from_path, target_to_difficulty, u256_to_block_hash},
+    utils::{bytes_to_hex, merkle_root_from_path, u256_to_block_hash},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use v1::{client_to_server, server_to_client, utils::HexU32Be};
 
 use crate::error::TproxyError;
