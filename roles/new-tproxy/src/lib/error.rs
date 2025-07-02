@@ -22,6 +22,7 @@ use v1::server_to_client::{Notify, SetDifficulty};
 #[derive(Debug)]
 pub enum TproxyError {
     VecToSlice32(Vec<u8>),
+    SV1Error,
     /// Errors on bad CLI argument input.
     BadCliArgs,
     /// Errors on bad `serde_json` serialize/deserialize.
@@ -105,6 +106,7 @@ impl fmt::Display for TproxyError {
             JobNotFound => write!(f, "Job not found during share validation"),
             InvalidMerkleRoot => write!(f, "Invalid merkle root during share validation"),
             Shutdown => write!(f, "Shutdown signal"),
+            SV1Error => write!(f, "Sv1 error"),
         }
     }
 }
@@ -179,5 +181,11 @@ impl From<Vec<u8>> for TproxyError {
 impl From<SetDifficulty> for TproxyError {
     fn from(e: SetDifficulty) -> Self {
         TproxyError::SetDifficultyToMessage(e)
+    }
+}
+
+impl<'a> From<v1::error::Error<'a>> for TproxyError {
+    fn from(value: v1::error::Error<'a>) -> Self {
+        TproxyError::SV1Error
     }
 }
