@@ -200,14 +200,13 @@ impl Sv1Server {
                                 self.sv1_server_channel_state.downstream_to_sv1_server_sender.clone(),
                                 self.sv1_server_channel_state.sv1_server_to_downstream_sender.clone(),
                                 first_target.clone(),
-                                self.shares_per_minute,
                                 self.config
                                     .downstream_difficulty_config
                                     .min_individual_miner_hashrate as f32,
                             );
                             // vardiff initialization
                             let vardiff = Arc::new(RwLock::new(VardiffState::new().expect("Failed to create vardiffstate")));
-                            self.sv1_server_data
+                            _ = self.sv1_server_data
                                 .safe_lock(|d| {
                                     d.downstreams.insert(downstream_id, downstream.clone());
                                     // Insert vardiff state for this downstream
