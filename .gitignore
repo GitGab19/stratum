@@ -20,4 +20,3 @@ cobertura.xml
 /test/integration-tests/template-provider
 **/template-provider
 stratum-message-generator
-.ra-target
