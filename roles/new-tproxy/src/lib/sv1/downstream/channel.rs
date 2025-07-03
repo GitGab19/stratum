@@ -31,6 +31,5 @@ impl DownstreamChannelState {
         debug!("Dropping downstream channel state");
         self.downstream_sv1_receiver.close();
         self.downstream_sv1_sender.close();
-        self.sv1_server_sender.close();
     }
 }

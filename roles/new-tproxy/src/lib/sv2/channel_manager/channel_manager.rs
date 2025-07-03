@@ -19,7 +19,10 @@ use roles_logic_sv2::{
     parsers::{AnyMessage, Mining},
     utils::Mutex,
 };
-use std::{sync::{Arc, RwLock}, time::Duration};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
@@ -179,14 +182,13 @@ impl ChannelManager {
                                     .channel_manager_data
                                     .super_safe_lock(|c| c.mode.clone());
 
-                                let active_job = if mode == ChannelMode::Aggregated {   
+                                let active_job = if mode == ChannelMode::Aggregated {
                                     self.channel_manager_data.super_safe_lock(|c| {
                                         c.upstream_extended_channel
                                             .as_ref()
                                             .and_then(|ch| ch.read().ok())
                                             .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
                                     })
-
                                 } else {
                                     self.channel_manager_data.super_safe_lock(|c| {
                                         c.extended_channels
@@ -447,22 +449,27 @@ impl ChannelManager {
                                         TproxyError::ChannelErrorSender
                                     })?;
                                 // send the last active job to the sv1 server
-                                let last_active_job = self.channel_manager_data.super_safe_lock(|c| {
-                                    c.upstream_extended_channel
-                                        .as_ref()
-                                        .and_then(|ch| ch.read().ok())
-                                        .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
-                                });
+                                let last_active_job =
+                                    self.channel_manager_data.super_safe_lock(|c| {
+                                        c.upstream_extended_channel
+                                            .as_ref()
+                                            .and_then(|ch| ch.read().ok())
+                                            .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
+                                    });
 
                                 if let Some(mut job) = last_active_job {
                                     job.channel_id = next_channel_id;
                                     self.channel_manager_data.super_safe_lock(|c| {
-                                        if let Some(ch) = c.extended_channels.get(&next_channel_id) {
-                                            ch.write().unwrap().on_new_extended_mining_job(job.clone());
+                                        if let Some(ch) = c.extended_channels.get(&next_channel_id)
+                                        {
+                                            ch.write()
+                                                .unwrap()
+                                                .on_new_extended_mining_job(job.clone());
                                         }
                                     });
                                     info!("job: {:?}", job);
-                                    // this is done to make sure that the job is sent after the initial handshake (subscribe, authorize, etc.) is done
+                                    // this is done to make sure that the job is sent after the
+                                    // initial handshake (subscribe, authorize, etc.) is done
                                     tokio::time::sleep(Duration::from_secs(2)).await;
                                     self.channel_state
                                         .sv1_server_sender

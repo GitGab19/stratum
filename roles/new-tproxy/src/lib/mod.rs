@@ -148,28 +148,28 @@ impl TranslatorSv2 {
                         break;
                     }
                     message = status_receiver.recv() => {
-                        error!("I received some error: {message:?}");
                         match message {
                             Ok(status) => {
                                 match status.state {
                                     State::DownstreamShutdown{downstream_id,..} => {
+                                        warn!("Downstream {downstream_id:?} disconnected, signalling sv1 server");
                                         notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdown(downstream_id)).unwrap();
                                     }
                                     State::Sv1ServerShutdown(_) => {
+                                        warn!("Sv1 Server send shutdown signal");
                                         notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                         break;
                                     }
                                     State::ChannelManagerShutdown(_) => {
+                                        warn!("Channel manager send shutdown signal");
                                         notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                         break;
                                     }
                                     State::UpstreamShutdown(_) => {
+                                        warn!("Upstream send shutdown signal");
                                         notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                         break;
                                     }
-                                    State::Healthy(_) => {
-                                    }
-
                                 }
                             }
                             _ => {}
