@@ -39,62 +39,64 @@ impl Upstream {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) -> Result<Self, TproxyError> {
-        // Attempt to connect to upstream with retries and shutdown awareness
-        let socket = loop {
-            match TcpStream::connect(upstreams[0].0).await {
-                Ok(socket) => {
-                    info!("Connected to upstream at {}", upstreams[0].0);
-                    break socket;
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        const RETRIES_PER_UPSTREAM: u8 = 3;
+    
+        for (index, (addr, pubkey)) in upstreams.iter().enumerate() {
+            info!("Trying to connect to upstream {} at {}", index, addr);
+    
+            for attempt in 1..=RETRIES_PER_UPSTREAM {
+                if shutdown_rx.try_recv().is_ok() {
+                    info!("Shutdown signal received during upstream connection attempt. Aborting.");
+                    drop(shutdown_complete_tx);
+                    return Err(TproxyError::Shutdown);
                 }
-                Err(e) => {
-                    error!(
-                        "Failed to connect to upstream at {}: {}. Retrying in 5s...",
-                        upstreams[0].0, e
-                    );
-
-                    // Wait before retrying
-                    sleep(Duration::from_secs(5)).await;
-
-                    // Check for shutdown signal
-                    if notify_shutdown.subscribe().try_recv().is_ok() {
-                        info!("Shutdown signal received during upstream connection attempt. Aborting.");
-                        drop(shutdown_complete_tx);
-                        return Err(TproxyError::Shutdown);
+    
+                match TcpStream::connect(addr).await {
+                    Ok(socket) => {
+                        info!("Connected to upstream at {} (attempt {}/{})", addr, attempt, RETRIES_PER_UPSTREAM);
+    
+                        let initiator = Initiator::from_raw_k(pubkey.into_bytes())?;
+                        match Connection::new(socket, HandshakeRole::Initiator(initiator)).await {
+                            Ok((receiver, sender)) => {
+                                let upstream_channel_state = UpstreamChannelState::new(
+                                    channel_manager_sender,
+                                    channel_manager_receiver,
+                                    receiver,
+                                    sender,
+                                );
+                                let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
+                                info!("Successfully initialized upstream channel with {}", addr);
+    
+                                return Ok(Self {
+                                    upstream_channel_state,
+                                    upstream_channel_data,
+                                });
+                            }
+                            Err(e) => {
+                                error!("Failed Noise handshake with {}: {:?}. Retrying...", addr, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to connect to {}: {}. Retry {}/{}...",
+                            addr, e, attempt, RETRIES_PER_UPSTREAM
+                        );
                     }
                 }
+    
+                sleep(Duration::from_secs(5)).await;
             }
-        };
-
-        // Perform Noise handshake
-        let initiator = Initiator::from_raw_k(upstreams[0].1.into_bytes())?;
-
-        let (upstream_receiver, upstream_sender) =
-            Connection::new(socket, HandshakeRole::Initiator(initiator))
-                .await
-                .map_err(|e| {
-                    error!(
-                        "Failed to establish Noise connection with upstream: {:?}",
-                        e
-                    );
-                    e
-                })?;
-
-        let upstream_channel_state = UpstreamChannelState::new(
-            channel_manager_sender,
-            channel_manager_receiver,
-            upstream_receiver,
-            upstream_sender,
-        );
-
-        let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
-
-        info!("Successfully initialized upstream channel");
-
-        Ok(Self {
-            upstream_channel_state,
-            upstream_channel_data,
-        })
+    
+            warn!("Exhausted retries for upstream {} at {}", index, addr);
+        }
+    
+        error!("Failed to connect to any configured upstream.");
+        drop(shutdown_complete_tx);
+        Err(TproxyError::Shutdown)
     }
+    
 
     pub async fn start(
         self,
