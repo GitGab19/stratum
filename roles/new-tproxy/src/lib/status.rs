@@ -55,8 +55,6 @@ pub enum State {
     ChannelManagerShutdown(TproxyError),
     /// Upstream SV2 connection closed or failed.
     UpstreamShutdown(TproxyError),
-    /// Component is healthy and operating as expected.
-    Healthy(String),
 }
 
 /// A message reporting the current [`State`] of a component.
