@@ -119,6 +119,10 @@ impl Sv1Server {
                                 info!("Downstream: {downstream_id} removed from sv1 server downstreams");
                             }
                         }
+                        Ok(ShutdownMessage::DownstreamShutdownAll) => {
+                            self.sv1_server_data.super_safe_lock(|d|{d.downstreams = HashMap::new();});
+                            info!("All downstream removed from sv1 server downstreams as upstream changed");
+                        }
                         _ => {}
                     }
                 }
@@ -414,6 +418,10 @@ impl Sv1Server {
                             if current_downstream.is_some() {
                                 info!("Downstream: {downstream_id} removed from sv1 server downstreams");
                             }
+                        }
+                        Ok(ShutdownMessage::DownstreamShutdownAll) => {
+                            self.sv1_server_data.super_safe_lock(|d|{d.downstreams = HashMap::new();});
+                            info!("All downstream removed from sv1 server downstreams as upstream changed");
                         }
                         _ => {}
                     }

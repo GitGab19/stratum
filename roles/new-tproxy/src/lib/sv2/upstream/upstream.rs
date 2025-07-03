@@ -41,21 +41,24 @@ impl Upstream {
     ) -> Result<Self, TproxyError> {
         let mut shutdown_rx = notify_shutdown.subscribe();
         const RETRIES_PER_UPSTREAM: u8 = 3;
-    
+
         for (index, (addr, pubkey)) in upstreams.iter().enumerate() {
             info!("Trying to connect to upstream {} at {}", index, addr);
-    
+
             for attempt in 1..=RETRIES_PER_UPSTREAM {
                 if shutdown_rx.try_recv().is_ok() {
                     info!("Shutdown signal received during upstream connection attempt. Aborting.");
                     drop(shutdown_complete_tx);
                     return Err(TproxyError::Shutdown);
                 }
-    
+
                 match TcpStream::connect(addr).await {
                     Ok(socket) => {
-                        info!("Connected to upstream at {} (attempt {}/{})", addr, attempt, RETRIES_PER_UPSTREAM);
-    
+                        info!(
+                            "Connected to upstream at {} (attempt {}/{})",
+                            addr, attempt, RETRIES_PER_UPSTREAM
+                        );
+
                         let initiator = Initiator::from_raw_k(pubkey.into_bytes())?;
                         match Connection::new(socket, HandshakeRole::Initiator(initiator)).await {
                             Ok((receiver, sender)) => {
@@ -67,14 +70,17 @@ impl Upstream {
                                 );
                                 let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
                                 info!("Successfully initialized upstream channel with {}", addr);
-    
+
                                 return Ok(Self {
                                     upstream_channel_state,
                                     upstream_channel_data,
                                 });
                             }
                             Err(e) => {
-                                error!("Failed Noise handshake with {}: {:?}. Retrying...", addr, e);
+                                error!(
+                                    "Failed Noise handshake with {}: {:?}. Retrying...",
+                                    addr, e
+                                );
                             }
                         }
                     }
@@ -85,18 +91,17 @@ impl Upstream {
                         );
                     }
                 }
-    
+
                 sleep(Duration::from_secs(5)).await;
             }
-    
+
             warn!("Exhausted retries for upstream {} at {}", index, addr);
         }
-    
+
         error!("Failed to connect to any configured upstream.");
         drop(shutdown_complete_tx);
         Err(TproxyError::Shutdown)
     }
-    
 
     pub async fn start(
         self,
@@ -118,10 +123,21 @@ impl Upstream {
                 }
                 info!("Upstream: SV2 connection setup successful.");
             }
-            _ = shutdown_rx.recv() => {
-                info!("Upstream: shutdown signal received during connection setup.");
-                drop(shutdown_complete_tx);
-                return Ok(());
+            message = shutdown_rx.recv() => {
+                match message {
+                    Ok(ShutdownMessage::ShutdownAll) => {
+                        info!("Upstream: shutdown signal received during connection setup.");
+                        drop(shutdown_complete_tx);
+                        return Ok(());
+                    }
+                    Ok(_) => {}
+
+                    Err(e) => {
+                        error!("Upstream: failed to receive shutdown signal: {e}");
+                        drop(shutdown_complete_tx);
+                        return Ok(());
+                    }
+                }
             }
         }
 

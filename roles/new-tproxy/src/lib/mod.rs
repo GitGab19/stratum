@@ -193,6 +193,7 @@ impl TranslatorSv2 {
                                                     notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                                     break;
                                                 } else {
+                                                    notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdownAll).unwrap();
                                                     info!("Upstream restarted successfully.");
                                                 }
                                             }

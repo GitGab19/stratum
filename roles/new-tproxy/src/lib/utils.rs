@@ -164,5 +164,6 @@ pub fn into_static(m: AnyMessage<'_>) -> Result<AnyMessage<'static>, TproxyError
 #[derive(Debug, Clone)]
 pub enum ShutdownMessage {
     ShutdownAll,
+    DownstreamShutdownAll,
     DownstreamShutdown(u32),
 }
