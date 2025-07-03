@@ -283,7 +283,8 @@ impl Sv1Server {
                         status_sender,
                     );
 
-                    // this is done to make sure that the job is sent after the initial handshake (subscribe, authorize, etc.) is done
+                    // this is done to make sure that the job is sent after the initial handshake
+                    // (subscribe, authorize, etc.) is done
                     time::sleep(Duration::from_secs(1)).await;
                     let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
                         TproxyError::General("Failed to generate set_difficulty".into())
