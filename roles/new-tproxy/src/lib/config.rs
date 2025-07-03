@@ -16,12 +16,7 @@ use serde::Deserialize;
 /// Configuration for the Translator.
 #[derive(Debug, Deserialize, Clone)]
 pub struct TranslatorConfig {
-    /// The address of the upstream server.
-    pub upstream_address: String,
-    /// The port of the upstream server.
-    pub upstream_port: u16,
-    /// The Secp256k1 public key used to authenticate the upstream authority.
-    pub upstream_authority_pubkey: Secp256k1PublicKey,
+    pub upstreams: Vec<Upstream>,
     /// The address for the downstream interface.
     pub downstream_address: String,
     /// The port for the downstream interface.
@@ -42,17 +37,18 @@ pub struct TranslatorConfig {
     /// If true, all miners share one channel. If false, each miner gets its own channel.
     pub aggregate_channels: bool,
 }
-/// Configuration settings specific to the upstream connection.
-pub struct UpstreamConfig {
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Upstream {
     /// The address of the upstream server.
-    address: String,
+    pub address: String,
     /// The port of the upstream server.
-    port: u16,
+    pub port: u16,
     /// The Secp256k1 public key used to authenticate the upstream authority.
-    authority_pubkey: Secp256k1PublicKey,
+    pub authority_pubkey: Secp256k1PublicKey,
 }
 
-impl UpstreamConfig {
+impl Upstream {
     /// Creates a new `UpstreamConfig` instance.
     pub fn new(address: String, port: u16, authority_pubkey: Secp256k1PublicKey) -> Self {
         Self {
@@ -88,7 +84,7 @@ impl TranslatorConfig {
     /// Creates a new `TranslatorConfig` instance by combining upstream and downstream
     /// configurations and specifying version and extranonce constraints.
     pub fn new(
-        upstream: UpstreamConfig,
+        upstreams: Vec<Upstream>,
         downstream: DownstreamConfig,
         max_supported_version: u16,
         min_supported_version: u16,
@@ -97,9 +93,7 @@ impl TranslatorConfig {
         aggregate_channels: bool,
     ) -> Self {
         Self {
-            upstream_address: upstream.address,
-            upstream_port: upstream.port,
-            upstream_authority_pubkey: upstream.authority_pubkey,
+            upstreams,
             downstream_address: downstream.address,
             downstream_port: downstream.port,
             max_supported_version,

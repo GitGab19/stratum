@@ -71,16 +71,19 @@ impl TranslatorSv2 {
         let (sv1_server_to_channel_manager_sender, sv1_server_to_channel_manager_receiver) =
             unbounded();
 
-        let upstream_addr = SocketAddr::new(
-            self.config.upstream_address.parse().unwrap(),
-            self.config.upstream_port,
-        );
-
-        info!("Connecting to upstream at: {}", upstream_addr);
+        let upstream_addresses = self
+            .config
+            .upstreams
+            .iter()
+            .map(|upstream| {
+                let upstream_addr =
+                    SocketAddr::new(upstream.address.parse().unwrap(), upstream.port);
+                (upstream_addr, upstream.authority_pubkey)
+            })
+            .collect::<Vec<_>>();
 
         let upstream = match Upstream::new(
-            upstream_addr,
-            self.config.upstream_authority_pubkey,
+            &upstream_addresses,
             upstream_to_channel_manager_sender.clone(),
             channel_manager_to_upstream_receiver.clone(),
             notify_shutdown.clone(),

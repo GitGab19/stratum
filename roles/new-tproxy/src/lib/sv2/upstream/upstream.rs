@@ -33,8 +33,7 @@ pub struct Upstream {
 
 impl Upstream {
     pub async fn new(
-        upstream_address: SocketAddr,
-        upstream_authority_public_key: Secp256k1PublicKey,
+        upstreams: &[(SocketAddr, Secp256k1PublicKey)],
         channel_manager_sender: Sender<EitherFrame>,
         channel_manager_receiver: Receiver<EitherFrame>,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
@@ -42,15 +41,15 @@ impl Upstream {
     ) -> Result<Self, TproxyError> {
         // Attempt to connect to upstream with retries and shutdown awareness
         let socket = loop {
-            match TcpStream::connect(upstream_address).await {
+            match TcpStream::connect(upstreams[0].0).await {
                 Ok(socket) => {
-                    info!("Connected to upstream at {}", upstream_address);
+                    info!("Connected to upstream at {}", upstreams[0].0);
                     break socket;
                 }
                 Err(e) => {
                     error!(
                         "Failed to connect to upstream at {}: {}. Retrying in 5s...",
-                        upstream_address, e
+                        upstreams[0].0, e
                     );
 
                     // Wait before retrying
@@ -67,7 +66,7 @@ impl Upstream {
         };
 
         // Perform Noise handshake
-        let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
+        let initiator = Initiator::from_raw_k(upstreams[0].1.into_bytes())?;
 
         let (upstream_receiver, upstream_sender) =
             Connection::new(socket, HandshakeRole::Initiator(initiator))

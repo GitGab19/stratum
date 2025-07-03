@@ -3,11 +3,6 @@
 # upstream_address = "18.196.32.109"
 # upstream_port = 3336
 
-# Local SRI Pool Upstream Connection
-upstream_address = "127.0.0.1"
-upstream_port = 34254
-upstream_authority_pubkey = "9auqWEzQDVyd2oe1JVGFLMLHZtCo2FFqZwtKA5gd9xbuEu7PH72"
-
 # Local Mining Device Downstream Connection
 downstream_address = "0.0.0.0"
 downstream_port = 34255
@@ -35,3 +30,13 @@ aggregate_channels = true
 min_individual_miner_hashrate=10_000_000_000_000.0
 # target number of shares per minute the miner should be sending
 shares_per_minute = 6.0
+
+[[upstreams]]
+address = "127.0.0.1"
+port = 34254
+authority_pubkey = "9auqWEzQDVyd2oe1JVGFLMLHZtCo2FFqZwtKA5gd9xbuEu7PH72"
+
+[[upstreams]]
+address = "75.119.150.111"
+port = 34254
+authority_pubkey = "9auqWEzQDVyd2oe1JVGFLMLHZtCo2FFqZwtKA5gd9xbuEu7PH72"
