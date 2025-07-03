@@ -78,6 +78,10 @@ impl Downstream {
                                 info!("Downstream {downstream_id}: received targeted shutdown");
                                 break;
                             }
+                            Ok(ShutdownMessage::DownstreamShutdownAll) => {
+                                info!("All downstream shutdown message received");
+                                break;
+                            }
                             Ok(_) => {
                                 // shutdown for other downstream
                             }
