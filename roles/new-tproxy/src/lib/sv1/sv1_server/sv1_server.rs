@@ -1,13 +1,9 @@
 use crate::{
-    config::TranslatorConfig,
-    error::TproxyError,
-    status::{handle_error, Status, StatusSender},
-    sv1::{
+    config::TranslatorConfig, error::TproxyError, status::{handle_error, Status, StatusSender}, sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
         sv1_server::{channel::Sv1ServerChannelState, data::Sv1ServerData},
         translation_utils::{create_notify, get_set_difficulty},
-    },
-    utils::ShutdownMessage,
+    }, task_manager::TaskManager, utils::ShutdownMessage
 };
 use async_channel::{Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -76,6 +72,7 @@ impl Sv1Server {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
+        task_manager: Arc<TaskManager>
     ) -> Result<(), TproxyError> {
         info!("Starting SV1 server on {}", self.listener_addr);
         let mut shutdown_rx_main = notify_shutdown.subscribe();
@@ -92,7 +89,7 @@ impl Sv1Server {
         .into();
 
         // Spawn vardiff loop
-        tokio::spawn(Self::spawn_vardiff_loop(
+        task_manager.spawn(Self::spawn_vardiff_loop(
             Arc::clone(&self),
             notify_shutdown.subscribe(),
             shutdown_complete_tx_main_clone.clone(),
@@ -176,7 +173,8 @@ impl Sv1Server {
                     first_target.clone(),
                     notify_shutdown.clone(),
                     shutdown_complete_tx_main_clone.clone(),
-                    status_sender.clone()
+                    status_sender.clone(),
+                    task_manager.clone()
                 ) => {
                     if let Err(e) = res {
                         handle_error(&sv1_status_sender, e).await;
@@ -254,6 +252,7 @@ impl Sv1Server {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
+        task_manager: Arc<TaskManager>
     ) -> Result<(), TproxyError> {
         let message = self
             .sv1_server_channel_state
@@ -285,6 +284,7 @@ impl Sv1Server {
                         notify_shutdown,
                         shutdown_complete_tx,
                         status_sender,
+                        task_manager
                     );
 
                     // this is done to make sure that the job is sent after the initial handshake

@@ -21,10 +21,7 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    status::{State, Status},
-    sv1::sv1_server::sv1_server::Sv1Server,
-    sv2::{channel_manager::ChannelMode, ChannelManager, Upstream},
-    utils::ShutdownMessage,
+    status::{State, Status}, sv1::sv1_server::sv1_server::Sv1Server, sv2::{channel_manager::ChannelMode, ChannelManager, Upstream}, task_manager::TaskManager, utils::ShutdownMessage
 };
 
 pub mod config;
@@ -33,6 +30,7 @@ pub mod status;
 pub mod sv1;
 pub mod sv2;
 pub mod utils;
+mod task_manager;
 
 /// The main struct that manages the SV1/SV2 translator.
 #[derive(Clone, Debug)]
@@ -56,6 +54,7 @@ impl TranslatorSv2 {
     pub async fn start(self) {
         let (notify_shutdown, _) = tokio::sync::broadcast::channel::<ShutdownMessage>(1);
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel::<()>(1);
+        let task_manager = Arc::new(TaskManager::new());
 
         let (status_sender, status_receiver) = async_channel::unbounded::<Status>();
 
@@ -127,6 +126,7 @@ impl TranslatorSv2 {
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
             status_sender.clone(),
+            task_manager.clone()
         )
         .await;
 
@@ -135,6 +135,7 @@ impl TranslatorSv2 {
                 notify_shutdown.clone(),
                 shutdown_complete_tx.clone(),
                 status_sender.clone(),
+                task_manager.clone()
             )
             .await
         {
@@ -144,7 +145,8 @@ impl TranslatorSv2 {
         let notify_shutdown_clone = notify_shutdown.clone();
         let shutdown_complete_tx_clone = shutdown_complete_tx.clone();
         let status_sender_clone = status_sender.clone();
-        tokio::spawn(async move {
+        let task_manager_clone = task_manager.clone();
+        task_manager.spawn(async move {
             loop {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
@@ -186,6 +188,7 @@ impl TranslatorSv2 {
                                                         notify_shutdown_clone.clone(),
                                                         shutdown_complete_tx_clone.clone(),
                                                         status_sender_clone.clone(),
+                                                        task_manager_clone.clone()
                                                     )
                                                     .await
                                                 {
@@ -218,6 +221,7 @@ impl TranslatorSv2 {
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
             status_sender.clone(),
+            task_manager.clone()
         )
         .await
         {
@@ -233,8 +237,10 @@ impl TranslatorSv2 {
                 info!("All tasks reported shutdown complete.");
             }
             _ = tokio::time::sleep(shutdown_timeout) => {
+                task_manager.abort_all().await;
                 warn!("Graceful shutdown timed out after {:?}. Some tasks might still be running.", shutdown_timeout);
             }
         }
+        task_manager.join_all().await;
     }
 }
