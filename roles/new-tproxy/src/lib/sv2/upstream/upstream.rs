@@ -1,8 +1,5 @@
 use crate::{
-    error::TproxyError,
-    status::{handle_error, Status, StatusSender},
-    sv2::upstream::{channel::UpstreamChannelState, data::UpstreamData},
-    utils::{message_from_frame, ShutdownMessage},
+    error::TproxyError, status::{handle_error, Status, StatusSender}, sv2::upstream::{channel::UpstreamChannelState, data::UpstreamData}, task_manager::TaskManager, utils::{message_from_frame, ShutdownMessage}
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::{HandshakeRole, Initiator, StandardEitherFrame, StandardSv2Frame};
@@ -108,6 +105,7 @@ impl Upstream {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
+        task_manager: Arc<TaskManager>
     ) -> Result<(), TproxyError> {
         info!("Upstream: starting...");
 
@@ -144,7 +142,7 @@ impl Upstream {
         // Wrap status sender and start upstream task
         let wrapped_status_sender = StatusSender::Upstream(status_sender);
 
-        self.run_upstream_task(notify_shutdown, shutdown_complete_tx, wrapped_status_sender)?;
+        self.run_upstream_task(notify_shutdown, shutdown_complete_tx, wrapped_status_sender, task_manager)?;
 
         Ok(())
     }
@@ -275,11 +273,12 @@ impl Upstream {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: StatusSender,
+        task_manager: Arc<TaskManager>
     ) -> Result<(), TproxyError> {
         let mut shutdown_rx = notify_shutdown.subscribe();
         let shutdown_complete_tx = shutdown_complete_tx.clone();
 
-        tokio::spawn(async move {
+        task_manager.spawn(async move {
             info!("Upstream task started (combined sender + receiver loop).");
 
             loop {

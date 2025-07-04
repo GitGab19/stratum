@@ -1,14 +1,11 @@
 use crate::{
-    error::TproxyError,
-    status::{handle_error, Status, StatusSender},
-    sv2::{
+    error::TproxyError, status::{handle_error, Status, StatusSender}, sv2::{
         channel_manager::{
             channel::ChannelState,
             data::{ChannelManagerData, ChannelMode},
         },
         upstream::upstream::{EitherFrame, Message, StdFrame},
-    },
-    utils::{into_static, ShutdownMessage},
+    }, task_manager::TaskManager, utils::{into_static, ShutdownMessage}
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::Frame;
@@ -60,11 +57,12 @@ impl ChannelManager {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
+        task_manager: Arc<TaskManager>
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         info!("Spawning run channel manager task");
         let status_sender = StatusSender::ChannelManager(status_sender);
-        tokio::spawn(async move {
+        task_manager.spawn(async move {
             loop {
                 tokio::select! {
                     message = shutdown_rx.recv() => {

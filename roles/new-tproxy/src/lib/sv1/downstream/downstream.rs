@@ -1,9 +1,6 @@
 use super::DownstreamMessages;
 use crate::{
-    error::TproxyError,
-    status::{handle_error, StatusSender},
-    sv1::downstream::{channel::DownstreamChannelState, data::DownstreamData},
-    utils::ShutdownMessage,
+    error::TproxyError, status::{handle_error, StatusSender}, sv1::downstream::{channel::DownstreamChannelState, data::DownstreamData}, task_manager::TaskManager, utils::ShutdownMessage
 };
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{mining_sv2::Target, utils::Mutex};
@@ -54,13 +51,14 @@ impl Downstream {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: StatusSender,
+        task_manager: Arc<TaskManager>
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         let downstream_id = self.downstream_data.super_safe_lock(|d| d.downstream_id);
 
         info!("Downstream {downstream_id}: spawning unified task");
 
-        tokio::spawn(async move {
+        task_manager.spawn(async move {
             loop {
                 let sv1_server_receiver = self
                     .downstream_channel_state
