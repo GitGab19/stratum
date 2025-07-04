@@ -35,8 +35,6 @@ impl UpstreamChannelState {
 
     pub fn drop(&self) {
         debug!("Closing all upstream channels");
-        self.channel_manager_receiver.close();
-        self.channel_manager_sender.close();
         self.upstream_receiver.close();
         self.upstream_receiver.close();
     }

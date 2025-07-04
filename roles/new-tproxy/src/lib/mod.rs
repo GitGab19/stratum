@@ -71,16 +71,19 @@ impl TranslatorSv2 {
         let (sv1_server_to_channel_manager_sender, sv1_server_to_channel_manager_receiver) =
             unbounded();
 
-        let upstream_addr = SocketAddr::new(
-            self.config.upstream_address.parse().unwrap(),
-            self.config.upstream_port,
-        );
-
-        info!("Connecting to upstream at: {}", upstream_addr);
+        let upstream_addresses = self
+            .config
+            .upstreams
+            .iter()
+            .map(|upstream| {
+                let upstream_addr =
+                    SocketAddr::new(upstream.address.parse().unwrap(), upstream.port);
+                (upstream_addr, upstream.authority_pubkey)
+            })
+            .collect::<Vec<_>>();
 
         let upstream = match Upstream::new(
-            upstream_addr,
-            self.config.upstream_authority_pubkey,
+            &upstream_addresses,
             upstream_to_channel_manager_sender.clone(),
             channel_manager_to_upstream_receiver.clone(),
             notify_shutdown.clone(),
@@ -139,6 +142,8 @@ impl TranslatorSv2 {
             return;
         }
         let notify_shutdown_clone = notify_shutdown.clone();
+        let shutdown_complete_tx_clone = shutdown_complete_tx.clone();
+        let status_sender_clone = status_sender.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -165,10 +170,39 @@ impl TranslatorSv2 {
                                         notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                         break;
                                     }
-                                    State::UpstreamShutdown(_) => {
-                                        warn!("Upstream send shutdown signal");
-                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
-                                        break;
+                                    State::UpstreamShutdown(msg) => {
+                                        warn!("Upstream disconnected: {msg:?}, attempting reconnection...");
+
+                                        match Upstream::new(
+                                            &upstream_addresses,
+                                            upstream_to_channel_manager_sender.clone(),
+                                            channel_manager_to_upstream_receiver.clone(),
+                                            notify_shutdown_clone.clone(),
+                                            shutdown_complete_tx_clone.clone(),
+                                        ).await {
+                                            Ok(upstream) => {
+                                                if let Err(e) = upstream
+                                                    .start(
+                                                        notify_shutdown_clone.clone(),
+                                                        shutdown_complete_tx_clone.clone(),
+                                                        status_sender_clone.clone(),
+                                                    )
+                                                    .await
+                                                {
+                                                    error!("Restarted upstream start failed: {e:?}");
+                                                    notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                                    break;
+                                                } else {
+                                                    notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdownAll).unwrap();
+                                                    info!("Upstream restarted successfully.");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to reinitialize upstream after shutdown: {e:?}");
+                                                notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                             }

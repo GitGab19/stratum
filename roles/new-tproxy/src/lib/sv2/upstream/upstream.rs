@@ -33,68 +33,74 @@ pub struct Upstream {
 
 impl Upstream {
     pub async fn new(
-        upstream_address: SocketAddr,
-        upstream_authority_public_key: Secp256k1PublicKey,
+        upstreams: &[(SocketAddr, Secp256k1PublicKey)],
         channel_manager_sender: Sender<EitherFrame>,
         channel_manager_receiver: Receiver<EitherFrame>,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
     ) -> Result<Self, TproxyError> {
-        // Attempt to connect to upstream with retries and shutdown awareness
-        let socket = loop {
-            match TcpStream::connect(upstream_address).await {
-                Ok(socket) => {
-                    info!("Connected to upstream at {}", upstream_address);
-                    break socket;
+        let mut shutdown_rx = notify_shutdown.subscribe();
+        const RETRIES_PER_UPSTREAM: u8 = 3;
+
+        for (index, (addr, pubkey)) in upstreams.iter().enumerate() {
+            info!("Trying to connect to upstream {} at {}", index, addr);
+
+            for attempt in 1..=RETRIES_PER_UPSTREAM {
+                if shutdown_rx.try_recv().is_ok() {
+                    info!("Shutdown signal received during upstream connection attempt. Aborting.");
+                    drop(shutdown_complete_tx);
+                    return Err(TproxyError::Shutdown);
                 }
-                Err(e) => {
-                    error!(
-                        "Failed to connect to upstream at {}: {}. Retrying in 5s...",
-                        upstream_address, e
-                    );
 
-                    // Wait before retrying
-                    sleep(Duration::from_secs(5)).await;
+                match TcpStream::connect(addr).await {
+                    Ok(socket) => {
+                        info!(
+                            "Connected to upstream at {} (attempt {}/{})",
+                            addr, attempt, RETRIES_PER_UPSTREAM
+                        );
 
-                    // Check for shutdown signal
-                    if notify_shutdown.subscribe().try_recv().is_ok() {
-                        info!("Shutdown signal received during upstream connection attempt. Aborting.");
-                        drop(shutdown_complete_tx);
-                        return Err(TproxyError::Shutdown);
+                        let initiator = Initiator::from_raw_k(pubkey.into_bytes())?;
+                        match Connection::new(socket, HandshakeRole::Initiator(initiator)).await {
+                            Ok((receiver, sender)) => {
+                                let upstream_channel_state = UpstreamChannelState::new(
+                                    channel_manager_sender,
+                                    channel_manager_receiver,
+                                    receiver,
+                                    sender,
+                                );
+                                let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
+                                info!("Successfully initialized upstream channel with {}", addr);
+
+                                return Ok(Self {
+                                    upstream_channel_state,
+                                    upstream_channel_data,
+                                });
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed Noise handshake with {}: {:?}. Retrying...",
+                                    addr, e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to connect to {}: {}. Retry {}/{}...",
+                            addr, e, attempt, RETRIES_PER_UPSTREAM
+                        );
                     }
                 }
+
+                sleep(Duration::from_secs(5)).await;
             }
-        };
 
-        // Perform Noise handshake
-        let initiator = Initiator::from_raw_k(upstream_authority_public_key.into_bytes())?;
+            warn!("Exhausted retries for upstream {} at {}", index, addr);
+        }
 
-        let (upstream_receiver, upstream_sender) =
-            Connection::new(socket, HandshakeRole::Initiator(initiator))
-                .await
-                .map_err(|e| {
-                    error!(
-                        "Failed to establish Noise connection with upstream: {:?}",
-                        e
-                    );
-                    e
-                })?;
-
-        let upstream_channel_state = UpstreamChannelState::new(
-            channel_manager_sender,
-            channel_manager_receiver,
-            upstream_receiver,
-            upstream_sender,
-        );
-
-        let upstream_channel_data = Arc::new(Mutex::new(UpstreamData));
-
-        info!("Successfully initialized upstream channel");
-
-        Ok(Self {
-            upstream_channel_state,
-            upstream_channel_data,
-        })
+        error!("Failed to connect to any configured upstream.");
+        drop(shutdown_complete_tx);
+        Err(TproxyError::Shutdown)
     }
 
     pub async fn start(
@@ -117,10 +123,21 @@ impl Upstream {
                 }
                 info!("Upstream: SV2 connection setup successful.");
             }
-            _ = shutdown_rx.recv() => {
-                info!("Upstream: shutdown signal received during connection setup.");
-                drop(shutdown_complete_tx);
-                return Ok(());
+            message = shutdown_rx.recv() => {
+                match message {
+                    Ok(ShutdownMessage::ShutdownAll) => {
+                        info!("Upstream: shutdown signal received during connection setup.");
+                        drop(shutdown_complete_tx);
+                        return Ok(());
+                    }
+                    Ok(_) => {}
+
+                    Err(e) => {
+                        error!("Upstream: failed to receive shutdown signal: {e}");
+                        drop(shutdown_complete_tx);
+                        return Ok(());
+                    }
+                }
             }
         }
 
