@@ -78,7 +78,7 @@ impl Sv1Server {
         channel_manager_sender: Sender<Mining<'static>>,
         config: TranslatorConfig,
     ) -> Self {
-        let shares_per_minute = config.downstream_difficulty_config.shares_per_minute as f32;
+        let shares_per_minute = config.downstream_difficulty_config.shares_per_minute;
         let sv1_server_channel_state =
             Sv1ServerChannelState::new(channel_manager_receiver, channel_manager_sender);
         let sv1_server_data = Arc::new(Mutex::new(Sv1ServerData::new()));
@@ -188,7 +188,7 @@ impl Sv1Server {
                                 first_target.clone(),
                                 self.config
                                     .downstream_difficulty_config
-                                    .min_individual_miner_hashrate as f32,
+                                    .min_individual_miner_hashrate,
                             );
                             // vardiff initialization
                             let vardiff = Arc::new(RwLock::new(VardiffState::new().expect("Failed to create vardiffstate")));
@@ -375,7 +375,7 @@ impl Sv1Server {
                     // send the set_difficulty message to the downstream
                     self.sv1_server_channel_state
                         .sv1_server_to_downstream_sender
-                        .send((m.channel_id, None, set_difficulty.into()))
+                        .send((m.channel_id, None, set_difficulty))
                         .map_err(|_| TproxyError::ChannelErrorSender)?;
                 } else {
                     error!("Downstream not found for downstream_id: {}", downstream_id);

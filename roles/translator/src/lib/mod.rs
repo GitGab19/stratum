@@ -159,61 +159,58 @@ impl TranslatorSv2 {
                         break;
                     }
                     message = status_receiver.recv() => {
-                        match message {
-                            Ok(status) => {
-                                match status.state {
-                                    State::DownstreamShutdown{downstream_id,..} => {
-                                        warn!("Downstream {downstream_id:?} disconnected, signalling sv1 server");
-                                        notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdown(downstream_id)).unwrap();
-                                    }
-                                    State::Sv1ServerShutdown(_) => {
-                                        warn!("Sv1 Server send shutdown signal");
-                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
-                                        break;
-                                    }
-                                    State::ChannelManagerShutdown(_) => {
-                                        warn!("Channel manager send shutdown signal");
-                                        notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
-                                        break;
-                                    }
-                                    State::UpstreamShutdown(msg) => {
-                                        warn!("Upstream disconnected: {msg:?}, attempting reconnection...");
+                        if let Ok(status) = message {
+                            match status.state {
+                                State::DownstreamShutdown{downstream_id,..} => {
+                                    warn!("Downstream {downstream_id:?} disconnected, signalling sv1 server");
+                                    notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdown(downstream_id)).unwrap();
+                                }
+                                State::Sv1ServerShutdown(_) => {
+                                    warn!("Sv1 Server send shutdown signal");
+                                    notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                    break;
+                                }
+                                State::ChannelManagerShutdown(_) => {
+                                    warn!("Channel manager send shutdown signal");
+                                    notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                    break;
+                                }
+                                State::UpstreamShutdown(msg) => {
+                                    warn!("Upstream disconnected: {msg:?}, attempting reconnection...");
 
-                                        match Upstream::new(
-                                            &upstream_addresses,
-                                            upstream_to_channel_manager_sender.clone(),
-                                            channel_manager_to_upstream_receiver.clone(),
-                                            notify_shutdown_clone.clone(),
-                                            shutdown_complete_tx_clone.clone(),
-                                        ).await {
-                                            Ok(upstream) => {
-                                                if let Err(e) = upstream
-                                                    .start(
-                                                        notify_shutdown_clone.clone(),
-                                                        shutdown_complete_tx_clone.clone(),
-                                                        status_sender_clone.clone(),
-                                                        task_manager_clone.clone()
-                                                    )
-                                                    .await
-                                                {
-                                                    error!("Restarted upstream start failed: {e:?}");
-                                                    notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
-                                                    break;
-                                                } else {
-                                                    notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdownAll).unwrap();
-                                                    info!("Upstream restarted successfully.");
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!("Failed to reinitialize upstream after shutdown: {e:?}");
+                                    match Upstream::new(
+                                        &upstream_addresses,
+                                        upstream_to_channel_manager_sender.clone(),
+                                        channel_manager_to_upstream_receiver.clone(),
+                                        notify_shutdown_clone.clone(),
+                                        shutdown_complete_tx_clone.clone(),
+                                    ).await {
+                                        Ok(upstream) => {
+                                            if let Err(e) = upstream
+                                                .start(
+                                                    notify_shutdown_clone.clone(),
+                                                    shutdown_complete_tx_clone.clone(),
+                                                    status_sender_clone.clone(),
+                                                    task_manager_clone.clone()
+                                                )
+                                                .await
+                                            {
+                                                error!("Restarted upstream start failed: {e:?}");
                                                 notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
                                                 break;
+                                            } else {
+                                                notify_shutdown_clone.send(ShutdownMessage::DownstreamShutdownAll).unwrap();
+                                                info!("Upstream restarted successfully.");
                                             }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to reinitialize upstream after shutdown: {e:?}");
+                                            notify_shutdown_clone.send(ShutdownMessage::ShutdownAll).unwrap();
+                                            break;
                                         }
                                     }
                                 }
                             }
-                            _ => {}
                         }
                     }
                 }

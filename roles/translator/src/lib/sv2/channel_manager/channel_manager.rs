@@ -115,12 +115,9 @@ impl ChannelManager {
             loop {
                 tokio::select! {
                     message = shutdown_rx.recv() => {
-                        match message {
-                            Ok(ShutdownMessage::ShutdownAll) => {
-                                info!("ChannelManager: received shutdown signal.");
-                                break;
-                            }
-                            _ => {}
+                        if let Ok(ShutdownMessage::ShutdownAll) = message {
+                            info!("ChannelManager: received shutdown signal.");
+                            break;
                         }
                     }
                     res = Self::handle_upstream_message(self.clone()) => {
@@ -415,7 +412,7 @@ impl ChannelManager {
                                         .into_b032()
                                         .into_static()
                                         .to_vec(),
-                                    target.clone().into(),
+                                    target.clone(),
                                     hashrate,
                                     true,
                                     new_extranonce_size as u16,
@@ -536,52 +533,49 @@ impl ChannelManager {
                     let mode = self
                         .channel_manager_data
                         .super_safe_lock(|c| c.mode.clone());
-                    if mode == ChannelMode::Aggregated {
-                        if self
+                    if mode == ChannelMode::Aggregated && self
                             .channel_manager_data
-                            .super_safe_lock(|c| c.upstream_extended_channel.is_some())
-                        {
-                            let upstream_extended_channel_id =
-                                self.channel_manager_data.super_safe_lock(|c| {
-                                    let upstream_extended_channel = c
-                                        .upstream_extended_channel
-                                        .as_ref()
-                                        .unwrap()
-                                        .read()
-                                        .unwrap();
-                                    upstream_extended_channel.get_channel_id()
-                                });
-                            m.channel_id = upstream_extended_channel_id; // We need to set the channel id to the upstream extended
-                                                                         // channel id
-                                                                         // Get the downstream channel's extranonce prefix (contains
-                                                                         // upstream prefix + translator proxy prefix)
-                            let downstream_extranonce_prefix =
-                                self.channel_manager_data.super_safe_lock(|c| {
-                                    c.extended_channels.get(&m.channel_id).map(|channel| {
-                                        channel.read().unwrap().get_extranonce_prefix().clone()
-                                    })
-                                });
-                            // Get the length of the upstream prefix (range0)
-                            let range0_len = self.channel_manager_data.super_safe_lock(|c| {
-                                c.extranonce_prefix_factory
+                            .super_safe_lock(|c| c.upstream_extended_channel.is_some()) {
+                        let upstream_extended_channel_id =
+                            self.channel_manager_data.super_safe_lock(|c| {
+                                let upstream_extended_channel = c
+                                    .upstream_extended_channel
                                     .as_ref()
                                     .unwrap()
-                                    .safe_lock(|e| e.get_range0_len())
-                                    .unwrap()
+                                    .read()
+                                    .unwrap();
+                                upstream_extended_channel.get_channel_id()
                             });
-                            if let Some(downstream_extranonce_prefix) = downstream_extranonce_prefix
-                            {
-                                // Skip the upstream prefix (range0) and take the remaining
-                                // bytes (translator proxy prefix)
-                                let translator_prefix = &downstream_extranonce_prefix[range0_len..];
-                                // Create new extranonce: translator proxy prefix + miner's
-                                // extranonce
-                                let mut new_extranonce = translator_prefix.to_vec();
-                                new_extranonce.extend_from_slice(m.extranonce.as_ref());
-                                // Replace the original extranonce with the modified one for
-                                // upstream submission
-                                m.extranonce = new_extranonce.try_into()?;
-                            }
+                        m.channel_id = upstream_extended_channel_id; // We need to set the channel id to the upstream extended
+                                                                     // channel id
+                                                                     // Get the downstream channel's extranonce prefix (contains
+                                                                     // upstream prefix + translator proxy prefix)
+                        let downstream_extranonce_prefix =
+                            self.channel_manager_data.super_safe_lock(|c| {
+                                c.extended_channels.get(&m.channel_id).map(|channel| {
+                                    channel.read().unwrap().get_extranonce_prefix().clone()
+                                })
+                            });
+                        // Get the length of the upstream prefix (range0)
+                        let range0_len = self.channel_manager_data.super_safe_lock(|c| {
+                            c.extranonce_prefix_factory
+                                .as_ref()
+                                .unwrap()
+                                .safe_lock(|e| e.get_range0_len())
+                                .unwrap()
+                        });
+                        if let Some(downstream_extranonce_prefix) = downstream_extranonce_prefix
+                        {
+                            // Skip the upstream prefix (range0) and take the remaining
+                            // bytes (translator proxy prefix)
+                            let translator_prefix = &downstream_extranonce_prefix[range0_len..];
+                            // Create new extranonce: translator proxy prefix + miner's
+                            // extranonce
+                            let mut new_extranonce = translator_prefix.to_vec();
+                            new_extranonce.extend_from_slice(m.extranonce.as_ref());
+                            // Replace the original extranonce with the modified one for
+                            // upstream submission
+                            m.extranonce = new_extranonce.try_into()?;
                         }
                     }
                     let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m))

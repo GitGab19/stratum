@@ -64,7 +64,7 @@ pub fn validate_sv1_share(
 
     let prev_hash_vec: Vec<u8> = job.prev_hash.clone().into();
     let prev_hash =
-        binary_sv2::U256::from_vec_(prev_hash_vec).map_err(|e| TproxyError::BinarySv2(e))?;
+        binary_sv2::U256::from_vec_(prev_hash_vec).map_err(TproxyError::BinarySv2)?;
 
     // calculate the merkle root from:
     // - job coinbase_tx_prefix
@@ -75,7 +75,7 @@ pub fn validate_sv1_share(
         job.coin_base1.as_ref(),
         job.coin_base2.as_ref(),
         full_extranonce.as_ref(),
-        &job.merkle_branch.as_ref(),
+        job.merkle_branch.as_ref(),
     )
     .ok_or(TproxyError::InvalidMerkleRoot)?
     .try_into()

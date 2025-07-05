@@ -10,6 +10,12 @@ pub struct TaskManager {
     tasks: StdMutex<Vec<JoinHandle<()>>>,
 }
 
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskManager {
     /// Creates a new TaskManager instance.
     ///

@@ -42,7 +42,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
         let (user_identity, nominal_hashrate, downstream_extranonce_len) = self
             .pending_channels
             .remove(&m.request_id)
-            .unwrap_or_else(|| ("unknown".to_string(), 100000.0, 0 as usize));
+            .unwrap_or_else(|| ("unknown".to_string(), 100000.0, 0_usize));
         info!(
             "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}, user: {}, hashrate: {}",
             m.request_id, m.channel_id, user_identity, nominal_hashrate
@@ -68,7 +68,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
             let upstream_extranonce_prefix: Extranonce = m.extranonce_prefix.clone().into();
             let translator_proxy_extranonce_prefix_len = proxy_extranonce_prefix_len(
                 m.extranonce_size.into(),
-                downstream_extranonce_len.into(),
+                downstream_extranonce_len,
             );
             // range 0 is the extranonce1 from upstream
             // range 1 is the extranonce1 added by the tproxy
@@ -223,11 +223,9 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
                 let mut channel = channel.write().unwrap();
                 channel.on_new_extended_mining_job(m_static.clone());
             });
-        } else {
-            if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
-                let mut channel = channel.write().unwrap();
-                channel.on_new_extended_mining_job(m_static.clone());
-            }
+        } else if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
+            let mut channel = channel.write().unwrap();
+            channel.on_new_extended_mining_job(m_static.clone());
         }
         Ok(SendTo::None(Some(Mining::NewExtendedMiningJob(m_static))))
     }
@@ -252,11 +250,9 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
                 let mut channel = channel.write().unwrap();
                 _ = channel.on_set_new_prev_hash(m_static.clone());
             });
-        } else {
-            if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
-                let mut channel = channel.write().unwrap();
-                _ = channel.on_set_new_prev_hash(m_static.clone());
-            }
+        } else if let Some(channel) = self.extended_channels.get(&m_static.channel_id) {
+            let mut channel = channel.write().unwrap();
+            _ = channel.on_set_new_prev_hash(m_static.clone());
         }
         Ok(SendTo::None(Some(Mining::SetNewPrevHash(m_static))))
     }
@@ -290,11 +286,9 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
                 let mut channel = channel.write().unwrap();
                 channel.set_target(m.maximum_target.clone().into());
             });
-        } else {
-            if let Some(channel) = self.extended_channels.get(&m.channel_id) {
-                let mut channel = channel.write().unwrap();
-                channel.set_target(m.maximum_target.clone().into());
-            }
+        } else if let Some(channel) = self.extended_channels.get(&m.channel_id) {
+            let mut channel = channel.write().unwrap();
+            channel.set_target(m.maximum_target.clone().into());
         }
         Ok(SendTo::None(None))
     }
