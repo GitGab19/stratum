@@ -37,7 +37,7 @@ impl DownstreamData {
     ) -> Self {
         DownstreamData {
             channel_id: None,
-            downstream_id: downstream_id,
+            downstream_id,
             extranonce1: vec![0; 8],
             extranonce2_len: 4,
             version_rolling_mask: None,
@@ -47,7 +47,7 @@ impl DownstreamData {
             user_identity: String::new(),
             valid_jobs: Vec::new(),
             target,
-            hashrate: hashrate,
+            hashrate,
             pending_set_difficulty: None,
             pending_target: None,
             pending_hashrate: None,

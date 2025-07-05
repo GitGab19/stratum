@@ -82,7 +82,7 @@ impl IsServer<'static> for DownstreamData {
                 extranonce: self.extranonce1.clone(),
                 extranonce2_len: self.extranonce2_len,
                 version_rolling_mask: self.version_rolling_mask.clone(),
-                last_job_version: self.last_job_version_field.clone(),
+                last_job_version: self.last_job_version_field,
             };
             if let Err(e) = self
                 .sv1_server_sender

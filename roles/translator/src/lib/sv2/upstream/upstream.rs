@@ -304,9 +304,7 @@ impl Upstream {
         match message {
             EitherFrame::Sv2(sv2_frame) => {
                 // Convert to standard frame
-                let std_frame: StdFrame = sv2_frame
-                    .try_into()
-                    .map_err(|_| TproxyError::General("Infalliable message".to_string()))?;
+                let std_frame: StdFrame = sv2_frame;
 
                 // Parse message from frame
                 let mut frame: codec_sv2::Frame<AnyMessage<'static>, buffer_sv2::Slice> =
@@ -330,7 +328,7 @@ impl Upstream {
 
                     AnyMessage::Mining(_) => {
                         // Forward mining message to channel manager
-                        let frame_to_forward = EitherFrame::Sv2(std_frame.into());
+                        let frame_to_forward = EitherFrame::Sv2(std_frame);
                         self.upstream_channel_state
                             .channel_manager_sender
                             .send(frame_to_forward)
@@ -451,7 +449,7 @@ impl Upstream {
 
         self.upstream_channel_state
             .upstream_sender
-            .send(sv2_frame.into())
+            .send(sv2_frame)
             .await
             .map_err(|e| {
                 error!("Failed to send message to upstream: {:?}", e);

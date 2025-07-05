@@ -8,6 +8,7 @@ use v1::json_rpc;
 pub struct DownstreamChannelState {
     pub downstream_sv1_sender: Sender<json_rpc::Message>,
     pub downstream_sv1_receiver: Receiver<json_rpc::Message>,
+    #[allow(dead_code)] // Used in message_handler.rs for share submission
     pub sv1_server_sender: Sender<DownstreamMessages>,
     pub sv1_server_receiver: broadcast::Sender<(u32, Option<u32>, json_rpc::Message)>, /* channel_id, optional downstream_id, message */
 }
