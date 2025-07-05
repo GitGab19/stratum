@@ -43,12 +43,10 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
             .pending_channels
             .remove(&m.request_id)
             .unwrap_or_else(|| ("unknown".to_string(), 100000.0, 0 as usize));
-
         info!(
             "Received OpenExtendedMiningChannelSuccess with request id: {} and channel id: {}, user: {}, hashrate: {}",
             m.request_id, m.channel_id, user_identity, nominal_hashrate
         );
-        debug!("OpenExtendedMiningChannelSuccess: {:?}", m);
         let extranonce_prefix = m.extranonce_prefix.clone().into_static().to_vec();
         let target = m.target.clone().into_static();
         let version_rolling = true; // we assume this is always true on extended channels
@@ -238,6 +236,7 @@ impl ParseMiningMessagesFromUpstream<Downstream> for ChannelManagerData {
         &mut self,
         m: SetNewPrevHash,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
+        info!("Received SetNewPrevHash for channel id: {}", m.channel_id);
         let m_static = m.clone().into_static();
         if self.mode == ChannelMode::Aggregated {
             if self.upstream_extended_channel.is_some() {
