@@ -17,8 +17,7 @@ use roles_logic_sv2::{
     utils::Mutex,
 };
 use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
+    sync::{Arc, RwLock}, time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
@@ -387,8 +386,8 @@ impl ChannelManager {
                                         }
                                     });
                                     // this is done to make sure that the job is sent after the
-                                    // initial handshake (subscribe, authorize, etc.) is done
-                                    tokio::time::sleep(Duration::from_secs(2)).await;
+                                    // the downstream is ready to receive the job (subscribed to the broadcast receiver of the sv1 server)
+                                    tokio::time::sleep(Duration::from_secs(3)).await;
                                     self.channel_state
                                         .sv1_server_sender
                                         .send(Mining::NewExtendedMiningJob(job.clone()))

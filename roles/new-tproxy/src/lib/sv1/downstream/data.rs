@@ -22,6 +22,9 @@ pub struct DownstreamData {
     pub pending_target: Option<Target>,
     pub pending_hashrate: Option<f32>,
     pub sv1_server_sender: Sender<DownstreamMessages>, // just here for time being
+    pub first_set_difficulty_received: bool,
+    // this is used to store the first notify message received in case it is received before the first set_difficulty
+    pub waiting_first_notify: Option<json_rpc::Message>, 
 }
 
 impl DownstreamData {
@@ -48,6 +51,8 @@ impl DownstreamData {
             pending_target: None,
             pending_hashrate: None,
             sv1_server_sender,
+            first_set_difficulty_received: false,
+            waiting_first_notify: None,
         }
     }
 
