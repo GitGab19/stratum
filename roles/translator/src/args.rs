@@ -36,7 +36,7 @@ impl Args {
     /// It supports the following options:
     /// - `-c <path>` or `--config <path>`: Specify a custom configuration file path
     /// - `-h` or `--help`: Display help message
-    /// 
+    ///
     /// If no configuration file is specified, it defaults to "proxy-config.toml".
     /// The method validates that the specified file exists before accepting it.
     ///

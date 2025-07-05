@@ -21,7 +21,11 @@ pub use v1::server_to_client;
 use config::TranslatorConfig;
 
 use crate::{
-    status::{State, Status}, sv1::sv1_server::sv1_server::Sv1Server, sv2::{channel_manager::ChannelMode, ChannelManager, Upstream}, task_manager::TaskManager, utils::ShutdownMessage
+    status::{State, Status},
+    sv1::sv1_server::sv1_server::Sv1Server,
+    sv2::{channel_manager::ChannelMode, ChannelManager, Upstream},
+    task_manager::TaskManager,
+    utils::ShutdownMessage,
 };
 
 pub mod config;
@@ -29,8 +33,8 @@ pub mod error;
 pub mod status;
 pub mod sv1;
 pub mod sv2;
-pub mod utils;
 mod task_manager;
+pub mod utils;
 
 /// The main struct that manages the SV1/SV2 translator.
 #[derive(Clone, Debug)]
@@ -126,7 +130,7 @@ impl TranslatorSv2 {
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
             status_sender.clone(),
-            task_manager.clone()
+            task_manager.clone(),
         )
         .await;
 
@@ -135,7 +139,7 @@ impl TranslatorSv2 {
                 notify_shutdown.clone(),
                 shutdown_complete_tx.clone(),
                 status_sender.clone(),
-                task_manager.clone()
+                task_manager.clone(),
             )
             .await
         {
@@ -221,7 +225,7 @@ impl TranslatorSv2 {
             notify_shutdown.clone(),
             shutdown_complete_tx.clone(),
             status_sender.clone(),
-            task_manager.clone()
+            task_manager.clone(),
         )
         .await
         {

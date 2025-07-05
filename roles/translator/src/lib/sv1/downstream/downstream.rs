@@ -1,6 +1,10 @@
 use super::DownstreamMessages;
 use crate::{
-    error::TproxyError, status::{handle_error, StatusSender}, sv1::downstream::{channel::DownstreamChannelState, data::DownstreamData}, task_manager::TaskManager, utils::ShutdownMessage
+    error::TproxyError,
+    status::{handle_error, StatusSender},
+    sv1::downstream::{channel::DownstreamChannelState, data::DownstreamData},
+    task_manager::TaskManager,
+    utils::ShutdownMessage,
 };
 use async_channel::{Receiver, Sender};
 use roles_logic_sv2::{mining_sv2::Target, utils::Mutex};
@@ -94,7 +98,7 @@ impl Downstream {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: StatusSender,
-        task_manager: Arc<TaskManager>
+        task_manager: Arc<TaskManager>,
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         let downstream_id = self.downstream_data.super_safe_lock(|d| d.downstream_id);
@@ -211,17 +215,22 @@ impl Downstream {
                             });
 
                             // Check if we have a waiting first notify to process
-                            let waiting_notify = self.downstream_data.super_safe_lock(|d| {
-                                d.waiting_first_notify.take()
-                            });
+                            let waiting_notify = self
+                                .downstream_data
+                                .super_safe_lock(|d| d.waiting_first_notify.take());
 
                             if let Some(notify_msg) = waiting_notify {
                                 debug!("Down: Processing waiting first notify after receiving set_difficulty");
                                 // Process the waiting notify message
                                 if let Message::Notification(notify_notification) = &notify_msg {
-                                    if let Ok(notify) = server_to_client::Notify::try_from(notify_notification.clone()) {
+                                    if let Ok(notify) = server_to_client::Notify::try_from(
+                                        notify_notification.clone(),
+                                    ) {
                                         // Send set_difficulty first
-                                        if let Some(set_difficulty_msg) = self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty.clone()) {
+                                        if let Some(set_difficulty_msg) = self
+                                            .downstream_data
+                                            .super_safe_lock(|d| d.pending_set_difficulty.clone())
+                                        {
                                             self.downstream_channel_state
                                                 .downstream_sv1_sender
                                                 .send(set_difficulty_msg)
@@ -235,7 +244,9 @@ impl Downstream {
                                                 if let Some(new_target) = d.pending_target.take() {
                                                     d.target = new_target;
                                                 }
-                                                if let Some(new_hashrate) = d.pending_hashrate.take() {
+                                                if let Some(new_hashrate) =
+                                                    d.pending_hashrate.take()
+                                                {
                                                     d.hashrate = new_hashrate;
                                                 }
                                                 d.pending_set_difficulty = None;
@@ -256,7 +267,10 @@ impl Downstream {
                                             .send(notify.into())
                                             .await
                                             .map_err(|e| {
-                                                error!("Failed to send notify to downstream: {:?}", e);
+                                                error!(
+                                                    "Failed to send notify to downstream: {:?}",
+                                                    e
+                                                );
                                                 TproxyError::ChannelErrorSender
                                             })?;
                                     }
@@ -266,11 +280,12 @@ impl Downstream {
                         }
                         "mining.notify" => {
                             debug!("Down: Received notify notification");
-                            // If this is the first notify and we haven't received set_difficulty yet, store it and wait
+                            // If this is the first notify and we haven't received set_difficulty
+                            // yet, store it and wait
                             let should_wait = self.downstream_data.super_safe_lock(|d| {
                                 !d.first_set_difficulty_received && d.valid_jobs.is_empty()
                             });
-                            
+
                             if should_wait {
                                 debug!("Down: First notify received before set_difficulty, storing and waiting...");
                                 self.downstream_data.super_safe_lock(|d| {
@@ -376,7 +391,7 @@ impl Downstream {
     ///
     /// This method processes SV1 protocol messages sent by the miner, including:
     /// - `mining.subscribe` - Subscription requests
-    /// - `mining.authorize` - Authorization requests  
+    /// - `mining.authorize` - Authorization requests
     /// - `mining.submit` - Share submissions
     /// - Other SV1 protocol messages
     ///
