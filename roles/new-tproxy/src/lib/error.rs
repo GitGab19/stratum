@@ -15,9 +15,13 @@ use v1::server_to_client::SetDifficulty;
 
 #[derive(Debug)]
 pub enum TproxyError {
+    /// Error converting a vector to a fixed-size slice
     VecToSlice32(Vec<u8>),
+    /// Generic SV1 protocol error
     SV1Error,
+    /// Error from the network helpers library
     NetworkHelpersError(network_helpers_sv2::Error),
+    /// Error from the roles logic library
     RolesSv2LogicError(roles_logic_sv2::Error),
     /// Errors on bad CLI argument input.
     BadCliArgs,
@@ -37,27 +41,35 @@ pub enum TproxyError {
     InvalidExtranonce(String),
     /// Errors on bad `String` to `int` conversion.
     ParseInt(std::num::ParseIntError),
+    /// Error parsing incoming upstream messages
     UpstreamIncoming(roles_logic_sv2::errors::Error),
+    /// Mining subprotocol error
     #[allow(dead_code)]
     SubprotocolMining(String),
-    // Locking Errors
+    /// Mutex poison lock error
     PoisonLock,
-    // Channel Receiver Error
+    /// Channel receiver error
     ChannelErrorReceiver(async_channel::RecvError),
+    /// Channel sender error
     ChannelErrorSender,
+    /// Broadcast channel receiver error
     BroadcastChannelErrorReceiver(broadcast::error::RecvError),
+    /// Tokio channel receiver error
     TokioChannelErrorRecv(tokio::sync::broadcast::error::RecvError),
-
+    /// Error converting SetDifficulty to Message
     SetDifficultyToMessage(SetDifficulty),
+    /// Target calculation error
     #[allow(clippy::enum_variant_names)]
     TargetError(roles_logic_sv2::errors::Error),
+    /// SV1 message exceeds maximum length
     Sv1MessageTooLong,
+    /// Received an unexpected message type
     UnexpectedMessage,
-    // Utils-specific errors
     /// Job not found during share validation
     JobNotFound,
     /// Invalid merkle root during share validation
     InvalidMerkleRoot,
+    /// Shutdown signal received
     Shutdown,
     /// Represents a generic channel send failure, described by a string.
     General(String),

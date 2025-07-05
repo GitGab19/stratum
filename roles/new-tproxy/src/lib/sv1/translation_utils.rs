@@ -11,10 +11,27 @@ use v1::{
 };
 
 use crate::error::TproxyError;
-/// Creates a new SV1 `mining.notify` message if both SV2 `SetNewPrevHash` and
-/// `NewExtendedMiningJob` messages have been received. If one of these messages is still being
-/// waited on, the function returns `None`.
-/// If clean_jobs = false, it means a new job is created, with the same PrevHash
+
+/// Creates a new SV1 `mining.notify` message from SV2 messages.
+///
+/// This function translates SV2 `SetNewPrevHash` and `NewExtendedMiningJob` messages
+/// into a corresponding SV1 `mining.notify` message that can be sent to downstream
+/// SV1 miners.
+///
+/// The function performs the following conversions:
+/// - Converts the extended mining job to non-segwit format
+/// - Extracts the previous block hash
+/// - Converts coinbase transaction prefix and suffix
+/// - Transforms the merkle path into SV1 format
+/// - Sets appropriate version, bits, and timestamp fields
+///
+/// # Arguments
+/// * `new_prev_hash` - SV2 message containing the previous block hash information
+/// * `new_job` - SV2 message containing the new mining job details
+/// * `clean_jobs` - Whether miners should abandon previous jobs
+///
+/// # Returns
+/// A properly formatted SV1 `mining.notify` message
 pub fn create_notify(
     new_prev_hash: SetNewPrevHash<'static>,
     new_job: NewExtendedMiningJob<'static>,
@@ -60,6 +77,18 @@ pub fn create_notify(
     notify_response
 }
 
+/// Converts an SV2 target into an SV1 `mining.set_difficulty` message.
+///
+/// This function takes an SV2 target value and converts it to the corresponding
+/// difficulty value that should be sent to SV1 miners via the `mining.set_difficulty`
+/// message.
+///
+/// # Arguments
+/// * `target` - The SV2 target value to convert
+///
+/// # Returns
+/// * `Ok(json_rpc::Message)` - The properly formatted SV1 set_difficulty message
+/// * `Err(TproxyError)` - If the target conversion fails
 pub fn get_set_difficulty(target: Target) -> Result<json_rpc::Message, TproxyError> {
     let value = difficulty_from_target(target)?;
     debug!("Difficulty from target: {:?}", value);

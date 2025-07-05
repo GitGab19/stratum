@@ -12,6 +12,19 @@ use v1::{
     server_to_client, IsServer,
 };
 
+/// Represents a downstream SV1 miner connection.
+///
+/// This struct manages the state and communication for a single SV1 miner connected
+/// to the translator. It handles:
+/// - SV1 protocol message processing (subscribe, authorize, submit)
+/// - Bidirectional message routing between miner and SV1 server
+/// - Mining job tracking and share validation
+/// - Difficulty adjustment coordination
+/// - Connection lifecycle management
+///
+/// Each downstream connection runs in its own async task that processes messages
+/// from both the miner and the server, ensuring proper message ordering and
+/// handling connection-specific state.
 #[derive(Debug, Clone)]
 pub struct Downstream {
     pub downstream_data: Arc<Mutex<DownstreamData>>,
@@ -19,6 +32,19 @@ pub struct Downstream {
 }
 
 impl Downstream {
+    /// Creates a new downstream connection instance.
+    ///
+    /// # Arguments
+    /// * `downstream_id` - Unique identifier for this downstream connection
+    /// * `downstream_sv1_sender` - Channel to send messages to the miner
+    /// * `downstream_sv1_receiver` - Channel to receive messages from the miner
+    /// * `sv1_server_sender` - Channel to send messages to the SV1 server
+    /// * `sv1_server_receiver` - Broadcast channel to receive messages from the SV1 server
+    /// * `target` - Initial difficulty target for this connection
+    /// * `hashrate` - Initial hashrate estimate for this connection
+    ///
+    /// # Returns
+    /// A new Downstream instance ready to handle miner communication
     pub fn new(
         downstream_id: u32,
         downstream_sv1_sender: Sender<json_rpc::Message>,
@@ -46,6 +72,23 @@ impl Downstream {
         }
     }
 
+    /// Spawns and runs the main task loop for this downstream connection.
+    ///
+    /// This method creates an async task that handles all communication for this
+    /// downstream connection. The task runs a select loop that processes:
+    /// - Shutdown signals (global, targeted, or all-downstream)
+    /// - Messages from the miner (subscribe, authorize, submit)
+    /// - Messages from the SV1 server (notify, set_difficulty, etc.)
+    ///
+    /// The task will continue running until a shutdown signal is received or
+    /// an unrecoverable error occurs. It ensures graceful cleanup of resources
+    /// and proper error reporting.
+    ///
+    /// # Arguments
+    /// * `notify_shutdown` - Broadcast channel for receiving shutdown signals
+    /// * `shutdown_complete_tx` - Channel to signal when shutdown is complete
+    /// * `status_sender` - Channel for sending status updates and errors
+    /// * `task_manager` - Manager for tracking spawned tasks
     pub fn run_downstream_tasks(
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
@@ -121,6 +164,27 @@ impl Downstream {
         });
     }
 
+    /// Handles messages received from the SV1 server.
+    ///
+    /// This method processes messages broadcast from the SV1 server to downstream
+    /// connections. It implements special logic to handle the timing issue where
+    /// `mining.notify` messages might arrive before `mining.set_difficulty` messages.
+    ///
+    /// Key behaviors:
+    /// - Filters messages by channel ID and downstream ID
+    /// - For `mining.set_difficulty`: Updates target/hashrate and processes any waiting notify
+    /// - For `mining.notify`: Ensures set_difficulty is sent first, handles first-notify timing
+    /// - For other messages: Forwards directly to the miner
+    ///
+    /// The method ensures that miners always receive `set_difficulty` before `notify`
+    /// for the first message pair, which prevents miners from being unable to start working.
+    ///
+    /// # Arguments
+    /// * `sv1_server_receiver` - Broadcast receiver for messages from the SV1 server
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_sv1_server_message(
         self: Arc<Self>,
         mut sv1_server_receiver: broadcast::Receiver<(u32, Option<u32>, json_rpc::Message)>,
@@ -308,6 +372,22 @@ impl Downstream {
         Ok(())
     }
 
+    /// Handles messages received from the downstream SV1 miner.
+    ///
+    /// This method processes SV1 protocol messages sent by the miner, including:
+    /// - `mining.subscribe` - Subscription requests
+    /// - `mining.authorize` - Authorization requests  
+    /// - `mining.submit` - Share submissions
+    /// - Other SV1 protocol messages
+    ///
+    /// The method delegates message processing to the downstream data handler,
+    /// which implements the SV1 protocol logic and generates appropriate responses.
+    /// Responses are sent back to the miner, while share submissions are forwarded
+    /// to the SV1 server for upstream processing.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error receiving or processing the message
     pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         let message = match self
             .downstream_channel_state

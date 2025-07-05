@@ -16,6 +16,26 @@ use v1::{client_to_server, server_to_client, utils::HexU32Be};
 
 use crate::error::TproxyError;
 
+/// Validates an SV1 share against the target difficulty and job parameters.
+///
+/// This function performs complete share validation by:
+/// 1. Finding the corresponding job from the valid jobs list
+/// 2. Constructing the full extranonce from extranonce1 and extranonce2
+/// 3. Calculating the merkle root from the coinbase transaction and merkle path
+/// 4. Building the block header with the share's nonce and timestamp
+/// 5. Hashing the header and comparing against the target difficulty
+///
+/// # Arguments
+/// * `share` - The SV1 submit message containing the share data
+/// * `target` - The target difficulty for this share
+/// * `extranonce1` - The first part of the extranonce (from server)
+/// * `version_rolling_mask` - Optional mask for version rolling
+/// * `valid_jobs` - List of valid jobs to validate against
+///
+/// # Returns
+/// * `Ok(true)` if the share is valid and meets the target
+/// * `Ok(false)` if the share is valid but doesn't meet the target
+/// * `Err(TproxyError)` if validation fails due to missing job or invalid data
 pub fn validate_sv1_share(
     share: &client_to_server::Submit<'static>,
     target: Target,
@@ -102,6 +122,17 @@ pub fn validate_sv1_share(
 }
 
 /// Calculates the required length of the proxy's extranonce prefix.
+///
+/// This function determines how many bytes the proxy needs to reserve for its own
+/// extranonce prefix, based on the difference between the channel's rollable extranonce
+/// size and the downstream miner's rollable extranonce size.
+///
+/// # Arguments
+/// * `channel_rollable_extranonce_size` - Size of the rollable extranonce from the channel
+/// * `downstream_rollable_extranonce_size` - Size of the rollable extranonce for downstream
+///
+/// # Returns
+/// The number of bytes needed for the proxy's extranonce prefix
 pub fn proxy_extranonce_prefix_len(
     channel_rollable_extranonce_size: usize,
     downstream_rollable_extranonce_size: usize,
@@ -109,6 +140,19 @@ pub fn proxy_extranonce_prefix_len(
     channel_rollable_extranonce_size - downstream_rollable_extranonce_size
 }
 
+/// Extracts message type, payload, and parsed message from an SV2 frame.
+///
+/// This function processes an SV2 frame and extracts the essential components:
+/// - Message type identifier
+/// - Raw payload bytes
+/// - Parsed message structure
+///
+/// # Arguments
+/// * `frame` - The SV2 frame to process
+///
+/// # Returns
+/// A tuple containing (message_type, payload, parsed_message) on success,
+/// or a TproxyError if the frame is invalid or cannot be parsed
 pub fn message_from_frame(
     frame: &mut Frame<AnyMessage<'static>, Slice>,
 ) -> Result<(u8, Vec<u8>, AnyMessage<'static>), TproxyError> {
@@ -137,6 +181,18 @@ pub fn message_from_frame(
     }
 }
 
+/// Converts a borrowed AnyMessage to a static lifetime version.
+///
+/// This function takes an AnyMessage with a borrowed lifetime and converts it to
+/// a static lifetime version, which is necessary for storing messages across
+/// async boundaries and in data structures.
+///
+/// # Arguments
+/// * `m` - The AnyMessage to convert to static lifetime
+///
+/// # Returns
+/// A static lifetime version of the message, or TproxyError if the message
+/// type is not supported for static conversion
 pub fn into_static(m: AnyMessage<'_>) -> Result<AnyMessage<'static>, TproxyError> {
     match m {
         AnyMessage::Mining(m) => Ok(AnyMessage::Mining(m.into_static())),
@@ -161,9 +217,16 @@ pub fn into_static(m: AnyMessage<'_>) -> Result<AnyMessage<'static>, TproxyError
     }
 }
 
+/// Messages used for coordinating shutdown across different components.
+///
+/// This enum defines the different types of shutdown signals that can be sent
+/// through the broadcast channel to coordinate graceful shutdown of the translator.
 #[derive(Debug, Clone)]
 pub enum ShutdownMessage {
+    /// Shutdown all components immediately
     ShutdownAll,
+    /// Shutdown all downstream connections
     DownstreamShutdownAll,
+    /// Shutdown a specific downstream connection by ID
     DownstreamShutdown(u32),
 }

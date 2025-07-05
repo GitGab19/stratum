@@ -30,6 +30,16 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
+/// SV1 server that handles connections from SV1 miners.
+///
+/// This struct manages the SV1 server component of the translator, which:
+/// - Accepts connections from SV1 miners
+/// - Manages difficulty adjustment for connected miners
+/// - Coordinates with the SV2 channel manager for upstream communication
+/// - Tracks mining jobs and share submissions
+///
+/// The server maintains state for multiple downstream connections and implements
+/// variable difficulty adjustment based on share submission rates.
 pub struct Sv1Server {
     sv1_server_channel_state: Sv1ServerChannelState,
     sv1_server_data: Arc<Mutex<Sv1ServerData>>,
@@ -42,9 +52,21 @@ pub struct Sv1Server {
 }
 
 impl Sv1Server {
+    /// Drops the server's channel state, cleaning up resources.
     pub fn drop(&self) {
         self.sv1_server_channel_state.drop();
     }
+    
+    /// Creates a new SV1 server instance.
+    ///
+    /// # Arguments
+    /// * `listener_addr` - The socket address to bind the server to
+    /// * `channel_manager_receiver` - Channel to receive messages from the channel manager
+    /// * `channel_manager_sender` - Channel to send messages to the channel manager
+    /// * `config` - Configuration settings for the translator
+    ///
+    /// # Returns
+    /// A new Sv1Server instance ready to accept connections
     pub fn new(
         listener_addr: SocketAddr,
         channel_manager_receiver: Receiver<Mining<'static>>,
@@ -67,6 +89,28 @@ impl Sv1Server {
         }
     }
 
+    /// Starts the SV1 server and begins accepting connections.
+    ///
+    /// This method:
+    /// - Binds to the configured listening address
+    /// - Spawns the variable difficulty adjustment loop
+    /// - Enters the main event loop to handle:
+    ///   - New miner connections
+    ///   - Shutdown signals
+    ///   - Messages from downstream miners (submit shares)
+    ///   - Messages from upstream SV2 channel manager
+    ///
+    /// The server will continue running until a shutdown signal is received.
+    ///
+    /// # Arguments
+    /// * `notify_shutdown` - Broadcast channel for shutdown coordination
+    /// * `shutdown_complete_tx` - Channel to signal shutdown completion
+    /// * `status_sender` - Channel for sending status updates
+    /// * `task_manager` - Manager for spawned async tasks
+    ///
+    /// # Returns
+    /// * `Ok(())` - Server shut down gracefully
+    /// * `Err(TproxyError)` - Server encountered an error
     pub async fn start(
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
@@ -189,6 +233,17 @@ impl Sv1Server {
         Ok(())
     }
 
+    /// Handles messages received from downstream SV1 miners.
+    ///
+    /// This method processes share submissions from miners by:
+    /// - Updating variable difficulty counters
+    /// - Extracting and validating share data
+    /// - Converting SV1 share format to SV2 SubmitSharesExtended
+    /// - Forwarding the share to the channel manager for upstream submission
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         let downstream_message = self
             .sv1_server_channel_state
@@ -246,6 +301,24 @@ impl Sv1Server {
         Ok(())
     }
 
+    /// Handles messages received from the upstream SV2 server via the channel manager.
+    ///
+    /// This method processes various SV2 messages including:
+    /// - OpenExtendedMiningChannelSuccess: Sets up downstream connections
+    /// - NewExtendedMiningJob: Converts to SV1 notify messages
+    /// - SetNewPrevHash: Updates block template information
+    /// - Channel error messages (TODO: implement proper handling)
+    ///
+    /// # Arguments
+    /// * `first_target` - Initial difficulty target for new connections
+    /// * `notify_shutdown` - Broadcast channel for shutdown coordination
+    /// * `shutdown_complete_tx` - Channel to signal shutdown completion
+    /// * `status_sender` - Channel for sending status updates
+    /// * `task_manager` - Manager for spawned async tasks
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_upstream_message(
         self: Arc<Self>,
         first_target: Target,
@@ -345,6 +418,20 @@ impl Sv1Server {
         Ok(())
     }
 
+    /// Opens an extended mining channel for a downstream connection.
+    ///
+    /// This method initiates the SV2 channel setup process by:
+    /// - Calculating the initial target based on configuration
+    /// - Generating a unique user identity for the miner
+    /// - Creating an OpenExtendedMiningChannel message
+    /// - Sending the request to the channel manager
+    ///
+    /// # Arguments
+    /// * `downstream` - The downstream connection to set up a channel for
+    ///
+    /// # Returns
+    /// * `Ok(())` - Channel setup request sent successfully
+    /// * `Err(TproxyError)` - Error setting up the channel
     pub async fn open_extended_mining_channel(
         &self,
         downstream: Downstream,
@@ -385,6 +472,15 @@ impl Sv1Server {
         Ok(())
     }
 
+    /// Retrieves a downstream connection by ID from the provided map.
+    ///
+    /// # Arguments
+    /// * `downstream_id` - The ID of the downstream connection to find
+    /// * `downstream` - HashMap containing downstream connections
+    ///
+    /// # Returns
+    /// * `Some(Downstream)` - If a downstream with the given ID exists
+    /// * `None` - If no downstream with the given ID is found
     pub fn get_downstream(
         downstream_id: u32,
         downstream: HashMap<u32, Downstream>,
@@ -392,6 +488,13 @@ impl Sv1Server {
         downstream.get(&downstream_id).cloned()
     }
 
+    /// Extracts the downstream ID from a Downstream instance.
+    ///
+    /// # Arguments
+    /// * `downstream` - The downstream connection to get the ID from
+    ///
+    /// # Returns
+    /// The downstream ID as a u32
     pub fn get_downstream_id(downstream: Downstream) -> u32 {
         downstream
             .downstream_data

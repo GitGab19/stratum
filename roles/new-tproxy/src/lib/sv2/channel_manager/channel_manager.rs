@@ -22,8 +22,25 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
+/// Type alias for SV2 mining messages with static lifetime
 pub type Sv2Message = Mining<'static>;
 
+/// Manages SV2 channels and message routing between upstream and downstream.
+///
+/// The ChannelManager serves as the central component that bridges SV2 upstream
+/// connections with SV1 downstream connections. It handles:
+/// - SV2 channel lifecycle management (open, close, error handling)
+/// - Message translation and routing between protocols
+/// - Extranonce management for aggregated vs non-aggregated modes
+/// - Share submission processing and validation
+/// - Job distribution to downstream connections
+///
+/// The manager supports two operational modes:
+/// - Aggregated: All downstream connections share a single extended channel
+/// - Non-aggregated: Each downstream connection gets its own extended channel
+///
+/// This design allows the translator to efficiently manage multiple mining
+/// connections while maintaining proper isolation and state management.
 #[derive(Debug, Clone)]
 pub struct ChannelManager {
     channel_state: ChannelState,
@@ -31,6 +48,17 @@ pub struct ChannelManager {
 }
 
 impl ChannelManager {
+    /// Creates a new ChannelManager instance.
+    ///
+    /// # Arguments
+    /// * `upstream_sender` - Channel to send messages to upstream
+    /// * `upstream_receiver` - Channel to receive messages from upstream
+    /// * `sv1_server_sender` - Channel to send messages to SV1 server
+    /// * `sv1_server_receiver` - Channel to receive messages from SV1 server
+    /// * `mode` - Operating mode (Aggregated or NonAggregated)
+    ///
+    /// # Returns
+    /// A new ChannelManager instance ready to handle message routing
     pub fn new(
         upstream_sender: Sender<EitherFrame>,
         upstream_receiver: Receiver<EitherFrame>,
@@ -51,6 +79,23 @@ impl ChannelManager {
         }
     }
 
+    /// Spawns and runs the main channel manager task loop.
+    ///
+    /// This method creates an async task that handles all message routing for the
+    /// channel manager. The task runs a select loop that processes:
+    /// - Shutdown signals for graceful termination
+    /// - Messages from upstream SV2 server
+    /// - Messages from downstream SV1 server
+    ///
+    /// The task continues running until a shutdown signal is received or an
+    /// unrecoverable error occurs. It ensures proper cleanup of resources
+    /// and error reporting.
+    ///
+    /// # Arguments
+    /// * `notify_shutdown` - Broadcast channel for receiving shutdown signals
+    /// * `shutdown_complete_tx` - Channel to signal when shutdown is complete
+    /// * `status_sender` - Channel for sending status updates and errors
+    /// * `task_manager` - Manager for tracking spawned tasks
     pub async fn run_channel_manager_tasks(
         self: Arc<Self>,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
@@ -98,6 +143,20 @@ impl ChannelManager {
         });
     }
 
+    /// Handles messages received from the upstream SV2 server.
+    ///
+    /// This method processes SV2 messages from upstream and routes them appropriately:
+    /// - Mining messages: Processed through the roles logic and forwarded to SV1 server
+    /// - Channel responses: Handled to manage channel lifecycle
+    /// - Job notifications: Converted and distributed to downstream connections
+    /// - Error messages: Logged and handled appropriately
+    ///
+    /// The method implements the core SV2 protocol logic for channel management,
+    /// including handling both aggregated and non-aggregated channel modes.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_upstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         let message = self
             .channel_state
@@ -263,6 +322,22 @@ impl ChannelManager {
         Ok(())
     }
 
+    /// Handles messages received from the downstream SV1 server.
+    ///
+    /// This method processes requests from the SV1 server, primarily:
+    /// - OpenExtendedMiningChannel: Sets up new SV2 channels for downstream connections
+    /// - SubmitSharesExtended: Processes share submissions from miners
+    ///
+    /// For channel opening, the method handles both aggregated and non-aggregated modes:
+    /// - Aggregated: Creates extended channels using extranonce prefixes
+    /// - Non-aggregated: Opens individual extended channels with the upstream for each downstream
+    ///
+    /// Share submissions are validated, processed through the channel logic,
+    /// and forwarded to the upstream server with appropriate extranonce handling.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_downstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
         let message = self
             .channel_state
