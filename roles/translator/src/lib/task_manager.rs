@@ -17,7 +17,7 @@ impl TaskManager {
     pub fn new() -> Self {
         Self {
             tasks: StdMutex::new(Vec::new()),
-        } 
+        }
     }
 
     /// Spawns a new async task and adds it to the managed collection.

@@ -1,11 +1,15 @@
 use crate::{
-    error::TproxyError, status::{handle_error, Status, StatusSender}, sv2::{
+    error::TproxyError,
+    status::{handle_error, Status, StatusSender},
+    sv2::{
         channel_manager::{
             channel::ChannelState,
             data::{ChannelManagerData, ChannelMode},
         },
         upstream::upstream::{EitherFrame, Message, StdFrame},
-    }, task_manager::TaskManager, utils::{into_static, ShutdownMessage}
+    },
+    task_manager::TaskManager,
+    utils::{into_static, ShutdownMessage},
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::Frame;
@@ -17,7 +21,8 @@ use roles_logic_sv2::{
     utils::Mutex,
 };
 use std::{
-    sync::{Arc, RwLock}, time::Duration,
+    sync::{Arc, RwLock},
+    time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
@@ -101,7 +106,7 @@ impl ChannelManager {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
-        task_manager: Arc<TaskManager>
+        task_manager: Arc<TaskManager>,
     ) {
         let mut shutdown_rx = notify_shutdown.subscribe();
         info!("Spawning run channel manager task");
@@ -461,7 +466,8 @@ impl ChannelManager {
                                         }
                                     });
                                     // this is done to make sure that the job is sent after the
-                                    // the downstream is ready to receive the job (subscribed to the broadcast receiver of the sv1 server)
+                                    // the downstream is ready to receive the job (subscribed to the
+                                    // broadcast receiver of the sv1 server)
                                     tokio::time::sleep(Duration::from_secs(3)).await;
                                     self.channel_state
                                         .sv1_server_sender

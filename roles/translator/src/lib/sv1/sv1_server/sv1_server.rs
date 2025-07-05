@@ -1,9 +1,14 @@
 use crate::{
-    config::TranslatorConfig, error::TproxyError, status::{handle_error, Status, StatusSender}, sv1::{
+    config::TranslatorConfig,
+    error::TproxyError,
+    status::{handle_error, Status, StatusSender},
+    sv1::{
         downstream::{downstream::Downstream, DownstreamMessages},
         sv1_server::{channel::Sv1ServerChannelState, data::Sv1ServerData},
         translation_utils::{create_notify, get_set_difficulty},
-    }, task_manager::TaskManager, utils::ShutdownMessage
+    },
+    task_manager::TaskManager,
+    utils::ShutdownMessage,
 };
 use async_channel::{Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
@@ -56,7 +61,7 @@ impl Sv1Server {
     pub fn drop(&self) {
         self.sv1_server_channel_state.drop();
     }
-    
+
     /// Creates a new SV1 server instance.
     ///
     /// # Arguments
@@ -116,7 +121,7 @@ impl Sv1Server {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
-        task_manager: Arc<TaskManager>
+        task_manager: Arc<TaskManager>,
     ) -> Result<(), TproxyError> {
         info!("Starting SV1 server on {}", self.listener_addr);
         let mut shutdown_rx_main = notify_shutdown.subscribe();
@@ -325,7 +330,7 @@ impl Sv1Server {
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
-        task_manager: Arc<TaskManager>
+        task_manager: Arc<TaskManager>,
     ) -> Result<(), TproxyError> {
         let message = self
             .sv1_server_channel_state
@@ -357,12 +362,13 @@ impl Sv1Server {
                         notify_shutdown,
                         shutdown_complete_tx,
                         status_sender,
-                        task_manager
+                        task_manager,
                     );
 
-                    // Small delay to ensure the downstream task has subscribed to the broadcast receiver
+                    // Small delay to ensure the downstream task has subscribed to the broadcast
+                    // receiver
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    
+
                     let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
                         TproxyError::General("Failed to generate set_difficulty".into())
                     })?;
@@ -377,7 +383,10 @@ impl Sv1Server {
             }
 
             Mining::NewExtendedMiningJob(m) => {
-                info!("Received NewExtendedMiningJob for channel id: {}", m.channel_id);
+                info!(
+                    "Received NewExtendedMiningJob for channel id: {}",
+                    m.channel_id
+                );
                 if let Some(prevhash) = self.sv1_server_data.super_safe_lock(|v| v.prevhash.clone())
                 {
                     let notify = create_notify(

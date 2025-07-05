@@ -31,7 +31,8 @@ pub enum ChannelMode {
 /// data structures like extranonce factories for aggregated mode.
 #[derive(Debug, Clone)]
 pub struct ChannelManagerData {
-    /// Store pending channel info by downstream_id: (user_identity, hashrate, downstream_extranonce_len)
+    /// Store pending channel info by downstream_id: (user_identity, hashrate,
+    /// downstream_extranonce_len)
     pub pending_channels: HashMap<u32, (String, f32, usize)>,
     /// Map of active extended channels by channel ID
     pub extended_channels: HashMap<u32, Arc<RwLock<ExtendedChannel<'static>>>>,
