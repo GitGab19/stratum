@@ -4,7 +4,10 @@
 //! and the `from_args` function to parse them from the command line.
 use std::path::PathBuf;
 
-/// Holds the parsed CLI arguments.
+/// Holds the parsed CLI arguments for the translator proxy.
+///
+/// This struct contains the configuration file path that will be used to
+/// initialize the translator with its runtime settings.
 #[derive(Debug)]
 pub struct Args {
     /// Path to the TOML configuration file.
@@ -29,8 +32,17 @@ impl Args {
 
     /// Parses the CLI arguments and returns a populated `Args` struct.
     ///
-    /// If no `-c` flag is provided, it defaults to `jds-config.toml`.
-    /// If `--help` is passed, it returns a help message as an error.
+    /// This method processes command-line arguments to extract the configuration file path.
+    /// It supports the following options:
+    /// - `-c <path>` or `--config <path>`: Specify a custom configuration file path
+    /// - `-h` or `--help`: Display help message
+    /// 
+    /// If no configuration file is specified, it defaults to "proxy-config.toml".
+    /// The method validates that the specified file exists before accepting it.
+    ///
+    /// # Returns
+    /// * `Ok(Args)` - Successfully parsed arguments with config path
+    /// * `Err(String)` - Help message or error if file doesn't exist
     pub fn from_args() -> Result<Self, String> {
         let cli_args = std::env::args();
 

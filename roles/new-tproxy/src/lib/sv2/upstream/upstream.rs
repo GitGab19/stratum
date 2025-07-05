@@ -18,10 +18,27 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, warn};
+
+/// Type alias for SV2 messages with static lifetime
 pub type Message = AnyMessage<'static>;
+/// Type alias for standard SV2 frames
 pub type StdFrame = StandardSv2Frame<Message>;
+/// Type alias for either handshake or SV2 frames
 pub type EitherFrame = StandardEitherFrame<Message>;
 
+/// Manages the upstream SV2 connection to a mining pool or proxy.
+///
+/// This struct handles the SV2 protocol communication with upstream servers,
+/// including:
+/// - Connection establishment with multiple upstream fallbacks
+/// - SV2 handshake and setup procedures
+/// - Message routing between channel manager and upstream
+/// - Connection monitoring and error handling
+/// - Graceful shutdown coordination
+///
+/// The upstream connection supports automatic failover between multiple
+/// configured upstream servers and implements retry logic for connection
+/// establishment.
 #[derive(Debug, Clone)]
 pub struct Upstream {
     upstream_channel_state: UpstreamChannelState,
@@ -29,6 +46,22 @@ pub struct Upstream {
 }
 
 impl Upstream {
+    /// Creates a new upstream connection by attempting to connect to configured servers.
+    ///
+    /// This method tries to establish a connection to one of the provided upstream
+    /// servers, implementing retry logic and fallback behavior. It will attempt
+    /// to connect to each server multiple times before giving up.
+    ///
+    /// # Arguments
+    /// * `upstreams` - List of (address, public_key) pairs for upstream servers
+    /// * `channel_manager_sender` - Channel to send messages to the channel manager
+    /// * `channel_manager_receiver` - Channel to receive messages from the channel manager
+    /// * `notify_shutdown` - Broadcast channel for shutdown coordination
+    /// * `shutdown_complete_tx` - Channel to signal shutdown completion
+    ///
+    /// # Returns
+    /// * `Ok(Upstream)` - Successfully connected to an upstream server
+    /// * `Err(TproxyError)` - Failed to connect to any upstream server
     pub async fn new(
         upstreams: &[(SocketAddr, Secp256k1PublicKey)],
         channel_manager_sender: Sender<EitherFrame>,
@@ -100,6 +133,26 @@ impl Upstream {
         Err(TproxyError::Shutdown)
     }
 
+    /// Starts the upstream connection and begins message processing.
+    ///
+    /// This method:
+    /// - Completes the SV2 handshake with the upstream server
+    /// - Spawns the main message processing task
+    /// - Handles graceful shutdown coordination
+    ///
+    /// The method will first attempt to complete the SV2 setup connection
+    /// handshake. If successful, it spawns a task to handle bidirectional
+    /// message flow between the channel manager and upstream server.
+    ///
+    /// # Arguments
+    /// * `notify_shutdown` - Broadcast channel for shutdown coordination
+    /// * `shutdown_complete_tx` - Channel to signal shutdown completion
+    /// * `status_sender` - Channel for sending status updates
+    /// * `task_manager` - Manager for spawned async tasks
+    ///
+    /// # Returns
+    /// * `Ok(())` - Upstream started successfully
+    /// * `Err(TproxyError)` - Error during startup or handshake
     pub async fn start(
         self,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
@@ -147,7 +200,19 @@ impl Upstream {
         Ok(())
     }
 
-    /// Handles SV2 handshake setup with the upstream.
+    /// Performs the SV2 handshake setup with the upstream server.
+    ///
+    /// This method handles the initial SV2 protocol handshake by:
+    /// - Creating and sending a SetupConnection message
+    /// - Waiting for the handshake response
+    /// - Validating and processing the response
+    ///
+    /// The handshake establishes the protocol version, capabilities, and
+    /// other connection parameters needed for SV2 communication.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Handshake completed successfully
+    /// * `Err(TproxyError)` - Handshake failed or connection error
     pub async fn setup_connection(&self) -> Result<(), TproxyError> {
         info!("Upstream: initiating SV2 handshake...");
 
@@ -211,7 +276,21 @@ impl Upstream {
         Ok(())
     }
 
-    /// Handles incoming messages from the upstream SV2 connection.
+    /// Processes incoming messages from the upstream SV2 server.
+    ///
+    /// This method handles different types of frames received from upstream:
+    /// - SV2 frames: Parses and routes mining/common messages appropriately
+    /// - Handshake frames: Logs for debugging (shouldn't occur during normal operation)
+    ///
+    /// Common messages are handled directly, while mining messages are forwarded
+    /// to the channel manager for processing and distribution to downstream connections.
+    ///
+    /// # Arguments
+    /// * `message` - The frame received from the upstream server
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message processed successfully
+    /// * `Err(TproxyError)` - Error processing the message
     pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), TproxyError> {
         match message {
             EitherFrame::Sv2(sv2_frame) => {
@@ -346,7 +425,18 @@ impl Upstream {
         Ok(())
     }
 
-    /// Sends a mining message to the upstream SV2 server.
+    /// Sends a message to the upstream SV2 server.
+    ///
+    /// This method forwards messages from the channel manager to the upstream
+    /// server. Messages are typically mining-related (share submissions, channel
+    /// requests, etc.) that need to be sent upstream.
+    ///
+    /// # Arguments
+    /// * `sv2_frame` - The SV2 frame to send to the upstream server
+    ///
+    /// # Returns
+    /// * `Ok(())` - Message sent successfully
+    /// * `Err(TproxyError)` - Error sending the message
     pub async fn send_upstream(&self, sv2_frame: EitherFrame) -> Result<(), TproxyError> {
         debug!("Sending message to upstream.");
 
