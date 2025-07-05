@@ -287,8 +287,9 @@ impl Sv1Server {
                         task_manager
                     );
 
-                    // this is done to make sure that the set_difficulty is sent after the receiver is ready
-                    time::sleep(Duration::from_secs(1)).await;
+                    // Small delay to ensure the downstream task has subscribed to the broadcast receiver
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    
                     let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
                         TproxyError::General("Failed to generate set_difficulty".into())
                     })?;

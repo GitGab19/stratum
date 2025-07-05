@@ -141,19 +141,86 @@ impl Downstream {
                 if let Message::Notification(notification) = &message {
                     match notification.method.as_str() {
                         "mining.set_difficulty" => {
-                            info!("Down: Received set_difficulty notification, storing for next notify");
                             self.downstream_data.super_safe_lock(|d| {
                                 d.pending_set_difficulty = Some(message.clone());
+                                d.first_set_difficulty_received = true;
                             });
-                            return Ok(()); // Defer sending until notify
+
+                            // Check if we have a waiting first notify to process
+                            let waiting_notify = self.downstream_data.super_safe_lock(|d| {
+                                d.waiting_first_notify.take()
+                            });
+
+                            if let Some(notify_msg) = waiting_notify {
+                                debug!("Down: Processing waiting first notify after receiving set_difficulty");
+                                // Process the waiting notify message
+                                if let Message::Notification(notify_notification) = &notify_msg {
+                                    if let Ok(notify) = server_to_client::Notify::try_from(notify_notification.clone()) {
+                                        // Send set_difficulty first
+                                        if let Some(set_difficulty_msg) = self.downstream_data.super_safe_lock(|d| d.pending_set_difficulty.clone()) {
+                                            self.downstream_channel_state
+                                                .downstream_sv1_sender
+                                                .send(set_difficulty_msg)
+                                                .await
+                                                .map_err(|e| {
+                                                    error!("Failed to send set_difficulty to downstream: {:?}", e);
+                                                    TproxyError::ChannelErrorSender
+                                                })?;
+
+                                            self.downstream_data.super_safe_lock(|d| {
+                                                if let Some(new_target) = d.pending_target.take() {
+                                                    d.target = new_target;
+                                                }
+                                                if let Some(new_hashrate) = d.pending_hashrate.take() {
+                                                    d.hashrate = new_hashrate;
+                                                }
+                                                d.pending_set_difficulty = None;
+                                            });
+                                        }
+
+                                        // Now send the notify
+                                        self.downstream_data.super_safe_lock(|d| {
+                                            d.last_job_version_field = Some(notify.version.0);
+                                            if notify.clean_jobs {
+                                                d.valid_jobs.clear();
+                                            }
+                                            d.valid_jobs.push(notify.clone());
+                                        });
+
+                                        self.downstream_channel_state
+                                            .downstream_sv1_sender
+                                            .send(notify.into())
+                                            .await
+                                            .map_err(|e| {
+                                                error!("Failed to send notify to downstream: {:?}", e);
+                                                TproxyError::ChannelErrorSender
+                                            })?;
+                                    }
+                                }
+                            }
+                            return Ok(()); // set_difficulty handled
                         }
                         "mining.notify" => {
+                            debug!("Down: Received notify notification");
+                            // If this is the first notify and we haven't received set_difficulty yet, store it and wait
+                            let should_wait = self.downstream_data.super_safe_lock(|d| {
+                                !d.first_set_difficulty_received && d.valid_jobs.is_empty()
+                            });
+                            
+                            if should_wait {
+                                debug!("Down: First notify received before set_difficulty, storing and waiting...");
+                                self.downstream_data.super_safe_lock(|d| {
+                                    d.waiting_first_notify = Some(message.clone());
+                                });
+                                return Ok(()); // Store and wait for set_difficulty
+                            }
+
                             let pending_set_difficulty = self
                                 .downstream_data
                                 .super_safe_lock(|d| d.pending_set_difficulty.clone());
 
                             if let Some(set_difficulty_msg) = &pending_set_difficulty {
-                                info!("Down: Sending pending set_difficulty before notify");
+                                debug!("Down: Sending pending set_difficulty before notify");
                                 self.downstream_channel_state
                                     .downstream_sv1_sender
                                     .send(set_difficulty_msg.clone())
