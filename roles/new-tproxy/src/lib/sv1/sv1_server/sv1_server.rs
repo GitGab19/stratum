@@ -287,8 +287,7 @@ impl Sv1Server {
                         task_manager
                     );
 
-                    // this is done to make sure that the job is sent after the initial handshake
-                    // (subscribe, authorize, etc.) is done
+                    // this is done to make sure that the set_difficulty is sent after the receiver is ready
                     time::sleep(Duration::from_secs(1)).await;
                     let set_difficulty = get_set_difficulty(first_target).map_err(|_| {
                         TproxyError::General("Failed to generate set_difficulty".into())
@@ -304,6 +303,7 @@ impl Sv1Server {
             }
 
             Mining::NewExtendedMiningJob(m) => {
+                info!("Received NewExtendedMiningJob for channel id: {}", m.channel_id);
                 if let Some(prevhash) = self.sv1_server_data.super_safe_lock(|v| v.prevhash.clone())
                 {
                     let notify = create_notify(
@@ -320,6 +320,7 @@ impl Sv1Server {
             }
 
             Mining::SetNewPrevHash(m) => {
+                info!("Received SetNewPrevHash for channel id: {}", m.channel_id);
                 self.clean_job.store(true, Ordering::SeqCst);
                 self.sv1_server_data
                     .super_safe_lock(|v| v.prevhash = Some(m.clone().into_static()));

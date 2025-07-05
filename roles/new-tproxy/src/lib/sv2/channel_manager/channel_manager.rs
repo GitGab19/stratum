@@ -196,7 +196,10 @@ impl ChannelManager {
                                     })
                                 };
 
-                                if let Some(job) = active_job {
+                                if let Some(mut job) = active_job {
+                                    if mode == ChannelMode::Aggregated {
+                                        job.channel_id = 0;
+                                    }
                                     self.channel_state
                                         .sv1_server_sender
                                         .send(NewExtendedMiningJob(job))
@@ -269,88 +272,7 @@ impl ChannelManager {
             .await
             .map_err(TproxyError::ChannelErrorReceiver)?;
         match message {
-            Mining::SubmitSharesExtended(mut m) => {
-                let value = self.channel_manager_data.super_safe_lock(|c| {
-                    let extended_channel = c.extended_channels.get(&m.channel_id);
-                    if let Some(extended_channel) = extended_channel {
-                        let channel = extended_channel.write();
-                        if let Ok(mut channel) = channel {
-                            return Some((
-                                channel.validate_share(m.clone()),
-                                channel.get_share_accounting().clone(),
-                            ));
-                        }
-                    }
-                    None
-                });
-                if let Some((Ok(_result), _share_accounting)) = value {
-                    let mode = self
-                        .channel_manager_data
-                        .super_safe_lock(|c| c.mode.clone());
-                    if mode == ChannelMode::Aggregated {
-                        if self
-                            .channel_manager_data
-                            .super_safe_lock(|c| c.upstream_extended_channel.is_some())
-                        {
-                            let upstream_extended_channel_id =
-                                self.channel_manager_data.super_safe_lock(|c| {
-                                    let upstream_extended_channel = c
-                                        .upstream_extended_channel
-                                        .as_ref()
-                                        .unwrap()
-                                        .read()
-                                        .unwrap();
-                                    upstream_extended_channel.get_channel_id()
-                                });
-                            m.channel_id = upstream_extended_channel_id; // We need to set the channel id to the upstream extended
-                                                                         // channel id
-                                                                         // Get the downstream channel's extranonce prefix (contains
-                                                                         // upstream prefix + translator proxy prefix)
-                            let downstream_extranonce_prefix =
-                                self.channel_manager_data.super_safe_lock(|c| {
-                                    c.extended_channels.get(&m.channel_id).map(|channel| {
-                                        channel.read().unwrap().get_extranonce_prefix().clone()
-                                    })
-                                });
-                            // Get the length of the upstream prefix (range0)
-                            let range0_len = self.channel_manager_data.super_safe_lock(|c| {
-                                c.extranonce_prefix_factory
-                                    .as_ref()
-                                    .unwrap()
-                                    .safe_lock(|e| e.get_range0_len())
-                                    .unwrap()
-                            });
-                            if let Some(downstream_extranonce_prefix) = downstream_extranonce_prefix
-                            {
-                                // Skip the upstream prefix (range0) and take the remaining
-                                // bytes (translator proxy prefix)
-                                let translator_prefix = &downstream_extranonce_prefix[range0_len..];
-                                // Create new extranonce: translator proxy prefix + miner's
-                                // extranonce
-                                let mut new_extranonce = translator_prefix.to_vec();
-                                new_extranonce.extend_from_slice(m.extranonce.as_ref());
-                                // Replace the original extranonce with the modified one for
-                                // upstream submission
-                                m.extranonce = new_extranonce.try_into()?;
-                            }
-                        }
-                    }
-                    let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m))
-                        .try_into()
-                        .map_err(TproxyError::RolesSv2LogicError)?;
-                    let frame: EitherFrame = frame.into();
-                    self.channel_state
-                        .upstream_sender
-                        .send(frame)
-                        .await
-                        .map_err(|e| {
-                            error!("Error while sending message to upstream: {e:?}");
-                            TproxyError::ChannelErrorSender
-                        })?;
-                }
-            }
             Mining::OpenExtendedMiningChannel(m) => {
-                info!("DOWNSTREAM-to-UPSTREAM: OpenExtendedMiningChannel: {:?}", m);
                 let mut open_channel_msg = m.clone();
                 let mut user_identity = std::str::from_utf8(m.user_identity.as_ref())
                     .map(|s| s.to_string())
@@ -362,7 +284,6 @@ impl ChannelManager {
                     .super_safe_lock(|c| c.mode.clone());
 
                 if mode == ChannelMode::Aggregated {
-                    info!("Aggregated mode");
                     if self
                         .channel_manager_data
                         .super_safe_lock(|c| c.upstream_extended_channel.is_some())
@@ -465,7 +386,6 @@ impl ChannelManager {
                                                 .on_new_extended_mining_job(job.clone());
                                         }
                                     });
-                                    info!("job: {:?}", job);
                                     // this is done to make sure that the job is sent after the
                                     // initial handshake (subscribe, authorize, etc.) is done
                                     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -497,7 +417,6 @@ impl ChannelManager {
                             user_identity.as_bytes().to_vec().try_into().unwrap();
                     }
                 }
-                info!("YESSSSS");
                 // Store the user identity and hashrate
                 self.channel_manager_data.super_safe_lock(|c| {
                     c.pending_channels.insert(
@@ -510,7 +429,6 @@ impl ChannelManager {
                     roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_channel_msg),
                 ))
                 .map_err(TproxyError::RolesSv2LogicError)?;
-                info!("\n\n\nframe sent to upstream: {:?}", frame);
                 self.channel_state
                     .upstream_sender
                     .send(frame.into())
@@ -519,6 +437,86 @@ impl ChannelManager {
                         error!("Failed to send open channel message to upstream: {:?}", e);
                         TproxyError::ChannelErrorSender
                     })?;
+            }
+            Mining::SubmitSharesExtended(mut m) => {
+                let value = self.channel_manager_data.super_safe_lock(|c| {
+                    let extended_channel = c.extended_channels.get(&m.channel_id);
+                    if let Some(extended_channel) = extended_channel {
+                        let channel = extended_channel.write();
+                        if let Ok(mut channel) = channel {
+                            return Some((
+                                channel.validate_share(m.clone()),
+                                channel.get_share_accounting().clone(),
+                            ));
+                        }
+                    }
+                    None
+                });
+                if let Some((Ok(_result), _share_accounting)) = value {
+                    let mode = self
+                        .channel_manager_data
+                        .super_safe_lock(|c| c.mode.clone());
+                    if mode == ChannelMode::Aggregated {
+                        if self
+                            .channel_manager_data
+                            .super_safe_lock(|c| c.upstream_extended_channel.is_some())
+                        {
+                            let upstream_extended_channel_id =
+                                self.channel_manager_data.super_safe_lock(|c| {
+                                    let upstream_extended_channel = c
+                                        .upstream_extended_channel
+                                        .as_ref()
+                                        .unwrap()
+                                        .read()
+                                        .unwrap();
+                                    upstream_extended_channel.get_channel_id()
+                                });
+                            m.channel_id = upstream_extended_channel_id; // We need to set the channel id to the upstream extended
+                                                                         // channel id
+                                                                         // Get the downstream channel's extranonce prefix (contains
+                                                                         // upstream prefix + translator proxy prefix)
+                            let downstream_extranonce_prefix =
+                                self.channel_manager_data.super_safe_lock(|c| {
+                                    c.extended_channels.get(&m.channel_id).map(|channel| {
+                                        channel.read().unwrap().get_extranonce_prefix().clone()
+                                    })
+                                });
+                            // Get the length of the upstream prefix (range0)
+                            let range0_len = self.channel_manager_data.super_safe_lock(|c| {
+                                c.extranonce_prefix_factory
+                                    .as_ref()
+                                    .unwrap()
+                                    .safe_lock(|e| e.get_range0_len())
+                                    .unwrap()
+                            });
+                            if let Some(downstream_extranonce_prefix) = downstream_extranonce_prefix
+                            {
+                                // Skip the upstream prefix (range0) and take the remaining
+                                // bytes (translator proxy prefix)
+                                let translator_prefix = &downstream_extranonce_prefix[range0_len..];
+                                // Create new extranonce: translator proxy prefix + miner's
+                                // extranonce
+                                let mut new_extranonce = translator_prefix.to_vec();
+                                new_extranonce.extend_from_slice(m.extranonce.as_ref());
+                                // Replace the original extranonce with the modified one for
+                                // upstream submission
+                                m.extranonce = new_extranonce.try_into()?;
+                            }
+                        }
+                    }
+                    let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m))
+                        .try_into()
+                        .map_err(TproxyError::RolesSv2LogicError)?;
+                    let frame: EitherFrame = frame.into();
+                    self.channel_state
+                        .upstream_sender
+                        .send(frame)
+                        .await
+                        .map_err(|e| {
+                            error!("Error while sending message to upstream: {e:?}");
+                            TproxyError::ChannelErrorSender
+                        })?;
+                }
             }
             _ => {}
         }
