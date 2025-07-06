@@ -34,7 +34,10 @@ impl StatusSender {
     pub async fn send(&self, status: Status) -> Result<(), async_channel::SendError<Status>> {
         match self {
             Self::Downstream { downstream_id, tx } => {
-                debug!("Sending status from Downstream [{}]: {:?}", downstream_id, status.state);
+                debug!(
+                    "Sending status from Downstream [{}]: {:?}",
+                    downstream_id, status.state
+                );
                 tx.send(status).await
             }
             Self::Sv1Server(tx) => {
