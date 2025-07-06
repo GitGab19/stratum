@@ -57,7 +57,6 @@ impl TranslatorSv2 {
     /// This method starts the main event loop, which handles connections,
     /// protocol translation, job management, and status reporting.
     pub async fn start(self) {
-        
         info!("TranslatorSv2 starting... setting up subsystems");
 
         let (notify_shutdown, _) = tokio::sync::broadcast::channel::<ShutdownMessage>(1);
@@ -101,7 +100,7 @@ impl TranslatorSv2 {
             Ok(upstream) => {
                 info!("Upstream initialized successfully.");
                 upstream
-            },
+            }
             Err(e) => {
                 error!("Failed to initialize upstream connection: {e:?}");
                 return;
