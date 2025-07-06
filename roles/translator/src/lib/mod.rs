@@ -10,6 +10,7 @@
 //! provides the `start` method as the main entry point for running the translator service.
 //! It relies on several sub-modules (`config`, `downstream_sv1`, `upstream_sv2`, `proxy`, `status`,
 //! etc.) for specialized functionalities.
+#![allow(clippy::module_inception)]
 use async_channel::unbounded;
 pub use roles_logic_sv2::utils::Mutex;
 use std::{net::SocketAddr, sync::Arc};
