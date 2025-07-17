@@ -978,6 +978,7 @@ dependencies = [
  "primitive-types",
  "template_distribution_sv2",
  "tracing",
+ "trait-variant",
 ]
 
 [[package]]

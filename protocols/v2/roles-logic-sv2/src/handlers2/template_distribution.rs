@@ -7,7 +7,8 @@ use template_distribution_sv2::{
 use core::convert::TryInto;
 use template_distribution_sv2::*;
 
-pub trait ParseTemplateDistributionMessagesFromServer {
+#[trait_variant::make(ParseTemplateDistributionMessagesFromServerAsync: Send)]
+pub trait ParseTemplateDistributionMessagesFromServerSync {
     fn handle_template_distribution_message(
         &mut self,
         message_type: u8,
@@ -57,7 +58,8 @@ pub trait ParseTemplateDistributionMessagesFromServer {
     ) -> Result<(), Error>;
 }
 
-pub trait ParseTemplateDistributionMessagesFromClient {
+#[trait_variant::make(ParseTemplateDistributionMessagesFromClientAsync: Send)]
+pub trait ParseTemplateDistributionMessagesFromClientSync {
     fn handle_template_distribution_message(
         &mut self,
         message_type: u8,

@@ -7,7 +7,8 @@ use job_declaration_sv2::{
     MESSAGE_TYPE_PROVIDE_MISSING_TRANSACTIONS_SUCCESS, MESSAGE_TYPE_PUSH_SOLUTION, *,
 };
 
-pub trait ParseJobDeclarationMessagesFromUpstream {
+#[trait_variant::make(ParseJobDeclarationMessagesFromUpstreamAsync: Send)]
+pub trait ParseJobDeclarationMessagesFromUpstreamSync {
     fn handle_job_declaration_message(
         &mut self,
         message_type: u8,
@@ -62,7 +63,8 @@ pub trait ParseJobDeclarationMessagesFromUpstream {
     ) -> Result<(), Error>;
 }
 
-pub trait ParseJobDeclarationMessagesFromDownstream {
+#[trait_variant::make(ParseJobDeclarationMessagesFromDownstreamAsync: Send)]
+pub trait ParseJobDeclarationMessagesFromDownstreamSync {
     fn handle_job_declaration_message(
         &mut self,
         message_type: u8,
