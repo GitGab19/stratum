@@ -20,7 +20,6 @@
 pub mod channel_logic;
 pub mod errors;
 pub mod handlers;
-pub mod handlers2;
 pub mod job_creator;
 pub mod utils;
 pub mod vardiff;
