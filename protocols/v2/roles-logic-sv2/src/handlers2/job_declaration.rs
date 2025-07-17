@@ -12,15 +12,12 @@ pub trait ParseJobDeclarationMessagesFromUpstream {
         &mut self,
         message_type: u8,
         payload: &mut [u8],
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error> {
+    ) -> Result<(), Error> {
         let parsed: JobDeclaration<'_> = (message_type, payload).try_into()?;
         self.dispatch_job_declaration(parsed)
     }
 
-    fn dispatch_job_declaration(
-        &mut self,
-        message: JobDeclaration<'_>,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error> {
+    fn dispatch_job_declaration(&mut self, message: JobDeclaration<'_>) -> Result<(), Error> {
         match message {
             JobDeclaration::AllocateMiningJobTokenSuccess(msg) => {
                 self.handle_allocate_mining_job_token_success(msg)
@@ -50,22 +47,19 @@ pub trait ParseJobDeclarationMessagesFromUpstream {
     fn handle_allocate_mining_job_token_success(
         &mut self,
         msg: AllocateMiningJobTokenSuccess,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_declare_mining_job_success(
         &mut self,
         msg: DeclareMiningJobSuccess,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_declare_mining_job_error(
-        &mut self,
-        msg: DeclareMiningJobError,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    fn handle_declare_mining_job_error(&mut self, msg: DeclareMiningJobError) -> Result<(), Error>;
 
     fn handle_provide_missing_transactions(
         &mut self,
         msg: ProvideMissingTransactions,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    ) -> Result<(), Error>;
 }
 
 pub trait ParseJobDeclarationMessagesFromDownstream {
@@ -73,15 +67,12 @@ pub trait ParseJobDeclarationMessagesFromDownstream {
         &mut self,
         message_type: u8,
         payload: &mut [u8],
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error> {
+    ) -> Result<(), Error> {
         let parsed: JobDeclaration<'_> = (message_type, payload).try_into()?;
         self.dispatch_job_declaration(parsed)
     }
 
-    fn dispatch_job_declaration(
-        &mut self,
-        message: JobDeclaration<'_>,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error> {
+    fn dispatch_job_declaration(&mut self, message: JobDeclaration<'_>) -> Result<(), Error> {
         match message {
             JobDeclaration::AllocateMiningJobToken(msg) => {
                 self.handle_allocate_mining_job_token(msg)
@@ -110,20 +101,14 @@ pub trait ParseJobDeclarationMessagesFromDownstream {
     fn handle_allocate_mining_job_token(
         &mut self,
         msg: AllocateMiningJobToken,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_declare_mining_job(
-        &mut self,
-        msg: DeclareMiningJob,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    fn handle_declare_mining_job(&mut self, msg: DeclareMiningJob) -> Result<(), Error>;
 
     fn handle_provide_missing_transactions_success(
         &mut self,
         msg: ProvideMissingTransactionsSuccess,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_push_solution(
-        &mut self,
-        msg: PushSolution,
-    ) -> Result<Option<Vec<JobDeclaration<'static>>>, Error>;
+    fn handle_push_solution(&mut self, msg: PushSolution) -> Result<(), Error>;
 }

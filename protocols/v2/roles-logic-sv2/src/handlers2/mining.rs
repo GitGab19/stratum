@@ -29,10 +29,7 @@ where
 
     fn is_downstream_authorized(&self, user_identity: &binary_sv2::Str0255) -> Result<bool, Error>;
 
-    fn handle_mining_message(
-        &mut self,
-        message: Mining,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error> {
+    fn handle_mining_message(&mut self, message: Mining) -> Result<(), Error> {
         let (channel_type, work_selection) =
             (self.get_channel_type(), self.is_work_selection_enabled());
 
@@ -40,11 +37,8 @@ where
         match message {
             OpenStandardMiningChannel(m) => {
                 if !self.is_downstream_authorized(&m.user_identity)? {
-                    return Ok(Some(vec![Mining::OpenMiningChannelError(
-                        mining_sv2::OpenMiningChannelError::new_unknown_user(
-                            m.get_request_id_as_u32(),
-                        ),
-                    )]));
+                    // Add correct error type
+                    return Err(Error::DownstreamDown);
                 }
 
                 match channel_type {
@@ -60,11 +54,8 @@ where
             }
             OpenExtendedMiningChannel(m) => {
                 if !self.is_downstream_authorized(&m.user_identity)? {
-                    return Ok(Some(vec![Mining::OpenMiningChannelError(
-                        mining_sv2::OpenMiningChannelError::new_unknown_user(
-                            m.get_request_id_as_u32(),
-                        ),
-                    )]));
+                    // Add correct Error type
+                    return Err(Error::DownstreamDown);
                 }
 
                 match channel_type {
@@ -111,32 +102,20 @@ where
     fn handle_open_standard_mining_channel(
         &mut self,
         msg: OpenStandardMiningChannel,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_open_extended_mining_channel(
         &mut self,
         msg: OpenExtendedMiningChannel,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_update_channel(
-        &mut self,
-        msg: UpdateChannel,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_update_channel(&mut self, msg: UpdateChannel) -> Result<(), Error>;
 
-    fn handle_submit_shares_standard(
-        &mut self,
-        msg: SubmitSharesStandard,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_submit_shares_standard(&mut self, msg: SubmitSharesStandard) -> Result<(), Error>;
 
-    fn handle_submit_shares_extended(
-        &mut self,
-        msg: SubmitSharesExtended,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_submit_shares_extended(&mut self, msg: SubmitSharesExtended) -> Result<(), Error>;
 
-    fn handle_set_custom_mining_job(
-        &mut self,
-        msg: SetCustomMiningJob,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_set_custom_mining_job(&mut self, msg: SetCustomMiningJob) -> Result<(), Error>;
 }
 
 pub trait ParseMiningMessagesFromUpstream<Down: D>
@@ -146,10 +125,7 @@ where
     fn get_channel_type(&self) -> SupportedChannelTypes;
     fn is_work_selection_enabled(&self) -> bool;
 
-    fn handle_mining_message(
-        &mut self,
-        message: Mining,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error> {
+    fn handle_mining_message(&mut self, message: Mining) -> Result<(), Error> {
         let (channel_type, work_selection) =
             (self.get_channel_type(), self.is_work_selection_enabled());
 
@@ -235,72 +211,45 @@ where
     fn handle_open_standard_mining_channel_success(
         &mut self,
         msg: OpenStandardMiningChannelSuccess,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_open_extended_mining_channel_success(
         &mut self,
         msg: OpenExtendedMiningChannelSuccess,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_open_mining_channel_error(
         &mut self,
         msg: OpenMiningChannelError,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_update_channel_error(
-        &mut self,
-        msg: UpdateChannelError,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_update_channel_error(&mut self, msg: UpdateChannelError) -> Result<(), Error>;
 
-    fn handle_close_channel(
-        &mut self,
-        msg: CloseChannel,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_close_channel(&mut self, msg: CloseChannel) -> Result<(), Error>;
 
-    fn handle_set_extranonce_prefix(
-        &mut self,
-        msg: SetExtranoncePrefix,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_set_extranonce_prefix(&mut self, msg: SetExtranoncePrefix) -> Result<(), Error>;
 
-    fn handle_submit_shares_success(
-        &mut self,
-        msg: SubmitSharesSuccess,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_submit_shares_success(&mut self, msg: SubmitSharesSuccess) -> Result<(), Error>;
 
-    fn handle_submit_shares_error(
-        &mut self,
-        msg: SubmitSharesError,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_submit_shares_error(&mut self, msg: SubmitSharesError) -> Result<(), Error>;
 
-    fn handle_new_mining_job(
-        &mut self,
-        msg: NewMiningJob,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_new_mining_job(&mut self, msg: NewMiningJob) -> Result<(), Error>;
 
-    fn handle_new_extended_mining_job(
-        &mut self,
-        msg: NewExtendedMiningJob,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_new_extended_mining_job(&mut self, msg: NewExtendedMiningJob) -> Result<(), Error>;
 
-    fn handle_set_new_prev_hash(
-        &mut self,
-        msg: SetNewPrevHash,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_set_new_prev_hash(&mut self, msg: SetNewPrevHash) -> Result<(), Error>;
 
     fn handle_set_custom_mining_job_success(
         &mut self,
         msg: SetCustomMiningJobSuccess,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_set_custom_mining_job_error(
         &mut self,
         msg: SetCustomMiningJobError,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_set_target(&mut self, msg: SetTarget) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_set_target(&mut self, msg: SetTarget) -> Result<(), Error>;
 
-    fn handle_set_group_channel(
-        &mut self,
-        msg: SetGroupChannel,
-    ) -> Result<Option<Vec<Mining<'static>>>, Error>;
+    fn handle_set_group_channel(&mut self, msg: SetGroupChannel) -> Result<(), Error>;
 }

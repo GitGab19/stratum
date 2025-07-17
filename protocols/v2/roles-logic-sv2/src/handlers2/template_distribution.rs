@@ -12,7 +12,7 @@ pub trait ParseTemplateDistributionMessagesFromServer {
         &mut self,
         message_type: u8,
         payload: &mut [u8],
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error> {
+    ) -> Result<(), Error> {
         let parsed: TemplateDistribution<'_> = (message_type, payload).try_into()?;
         self.dispatch_template_distribution(parsed)
     }
@@ -20,7 +20,7 @@ pub trait ParseTemplateDistributionMessagesFromServer {
     fn dispatch_template_distribution(
         &mut self,
         message: TemplateDistribution<'_>,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error> {
+    ) -> Result<(), Error> {
         match message {
             TemplateDistribution::NewTemplate(m) => self.handle_new_template(m),
             TemplateDistribution::SetNewPrevHash(m) => self.handle_set_new_prev_hash(m),
@@ -42,25 +42,19 @@ pub trait ParseTemplateDistributionMessagesFromServer {
             }
         }
     }
-    fn handle_new_template(
-        &mut self,
-        msg: NewTemplate,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    fn handle_new_template(&mut self, msg: NewTemplate) -> Result<(), Error>;
 
-    fn handle_set_new_prev_hash(
-        &mut self,
-        msg: SetNewPrevHash,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    fn handle_set_new_prev_hash(&mut self, msg: SetNewPrevHash) -> Result<(), Error>;
 
     fn handle_request_tx_data_success(
         &mut self,
         msg: RequestTransactionDataSuccess,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
     fn handle_request_tx_data_error(
         &mut self,
         msg: RequestTransactionDataError,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    ) -> Result<(), Error>;
 }
 
 pub trait ParseTemplateDistributionMessagesFromClient {
@@ -68,7 +62,7 @@ pub trait ParseTemplateDistributionMessagesFromClient {
         &mut self,
         message_type: u8,
         payload: &mut [u8],
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error> {
+    ) -> Result<(), Error> {
         let parsed: TemplateDistribution<'_> = (message_type, payload).try_into()?;
         self.dispatch_template_distribution(parsed)
     }
@@ -76,7 +70,7 @@ pub trait ParseTemplateDistributionMessagesFromClient {
     fn dispatch_template_distribution(
         &mut self,
         message: TemplateDistribution<'_>,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error> {
+    ) -> Result<(), Error> {
         match message {
             TemplateDistribution::CoinbaseOutputConstraints(m) => {
                 self.handle_coinbase_out_data_size(m)
@@ -102,14 +96,8 @@ pub trait ParseTemplateDistributionMessagesFromClient {
     fn handle_coinbase_out_data_size(
         &mut self,
         msg: CoinbaseOutputConstraints,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    ) -> Result<(), Error>;
 
-    fn handle_request_tx_data(
-        &mut self,
-        msg: RequestTransactionData,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
-    fn handle_request_submit_solution(
-        &mut self,
-        msg: SubmitSolution,
-    ) -> Result<Option<Vec<TemplateDistribution<'static>>>, Error>;
+    fn handle_request_tx_data(&mut self, msg: RequestTransactionData) -> Result<(), Error>;
+    fn handle_request_submit_solution(&mut self, msg: SubmitSolution) -> Result<(), Error>;
 }
