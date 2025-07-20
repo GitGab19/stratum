@@ -1,5 +1,5 @@
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel, mining_sv2::ExtendedExtranonce, utils::Mutex,
+    channels_sv2::client::extended::ExtendedChannel, mining_sv2::ExtendedExtranonce, utils::Mutex,
 };
 use std::{
     collections::HashMap,

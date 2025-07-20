@@ -8,7 +8,7 @@ use roles_logic_sv2::{
         CompactTarget, TxMerkleNode,
     },
     mining_sv2::Target,
-    parsers::{AnyMessage, CommonMessages},
+    parsers_sv2::{AnyMessage, CommonMessages},
     utils::{bytes_to_hex, merkle_root_from_path, u256_to_block_hash},
 };
 use tracing::{debug, error};

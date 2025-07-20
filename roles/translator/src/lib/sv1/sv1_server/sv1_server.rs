@@ -14,7 +14,7 @@ use async_channel::{Receiver, Sender};
 use network_helpers_sv2::sv1_connection::ConnectionSV1;
 use roles_logic_sv2::{
     mining_sv2::{SubmitSharesExtended, Target},
-    parsers::Mining,
+    parsers_sv2::Mining,
     utils::{hash_rate_to_target, Mutex},
     vardiff::classic::VardiffState,
     Vardiff,

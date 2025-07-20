@@ -12,7 +12,7 @@ use network_helpers_sv2::noise_connection::Connection;
 use roles_logic_sv2::{
     common_messages_sv2::{Protocol, SetupConnection},
     handlers::common::ParseCommonMessagesFromUpstream,
-    parsers::AnyMessage,
+    parsers_sv2::AnyMessage,
     utils::Mutex,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -232,7 +232,7 @@ impl Upstream {
                 .try_into()
                 .map_err(|e| {
                     error!("Failed to serialize SetupConnection message: {:?}", e);
-                    TproxyError::RolesSv2LogicError(e)
+                    TproxyError::RolesSv2LogicParserError(e)
                 })?;
 
         // Send SetupConnection message to upstream

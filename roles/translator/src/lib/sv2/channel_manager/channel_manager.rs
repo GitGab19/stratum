@@ -14,10 +14,10 @@ use crate::{
 use async_channel::{Receiver, Sender};
 use codec_sv2::Frame;
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel,
+    channels_sv2::client::extended::ExtendedChannel,
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo},
     mining_sv2::OpenExtendedMiningChannelSuccess,
-    parsers::{AnyMessage, Mining},
+    parsers_sv2::{AnyMessage, Mining},
     utils::Mutex,
 };
 use std::sync::{Arc, RwLock};
@@ -496,9 +496,11 @@ impl ChannelManager {
                 });
 
                 let frame = StdFrame::try_from(Message::Mining(
-                    roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(open_channel_msg),
+                    roles_logic_sv2::parsers_sv2::Mining::OpenExtendedMiningChannel(
+                        open_channel_msg,
+                    ),
                 ))
-                .map_err(TproxyError::RolesSv2LogicError)?;
+                .map_err(TproxyError::RolesSv2LogicParserError)?;
                 self.channel_state
                     .upstream_sender
                     .send(frame.into())
@@ -574,7 +576,7 @@ impl ChannelManager {
                     }
                     let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m))
                         .try_into()
-                        .map_err(TproxyError::RolesSv2LogicError)?;
+                        .map_err(TproxyError::RolesSv2LogicParserError)?;
                     let frame: EitherFrame = frame.into();
                     self.channel_state
                         .upstream_sender

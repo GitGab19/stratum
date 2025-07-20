@@ -1,4 +1,3 @@
-use roles_logic_sv2::common_properties::{IsDownstream, IsMiningDownstream};
 use tracing::{debug, error, info};
 use v1::{
     client_to_server, json_rpc, server_to_client,
@@ -7,9 +6,7 @@ use v1::{
 };
 
 use crate::{
-    sv1::downstream::{
-        data::DownstreamData, downstream::Downstream, DownstreamMessages, SubmitShareWithChannelId,
-    },
+    sv1::downstream::{data::DownstreamData, DownstreamMessages, SubmitShareWithChannelId},
     utils::validate_sv1_share,
 };
 
@@ -152,16 +149,5 @@ impl IsServer<'static> for DownstreamData {
 
     fn notify(&'_ mut self) -> Result<json_rpc::Message, v1::error::Error<'_>> {
         unreachable!()
-    }
-}
-
-// Can we remove this?
-impl IsMiningDownstream for Downstream {}
-// Can we remove this?
-impl IsDownstream for Downstream {
-    fn get_downstream_mining_data(
-        &self,
-    ) -> roles_logic_sv2::common_properties::CommonDownstreamData {
-        todo!()
     }
 }

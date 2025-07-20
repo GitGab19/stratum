@@ -6,13 +6,13 @@ use crate::{
     utils::proxy_extranonce_prefix_len,
 };
 use roles_logic_sv2::{
-    channels::client::extended::ExtendedChannel,
+    channels_sv2::client::extended::ExtendedChannel,
     handlers::mining::{ParseMiningMessagesFromUpstream, SendTo, SupportedChannelTypes},
     mining_sv2::{
         ExtendedExtranonce, Extranonce, NewExtendedMiningJob, OpenExtendedMiningChannelSuccess,
         SetNewPrevHash, SetTarget, MAX_EXTRANONCE_LEN,
     },
-    parsers::Mining,
+    parsers_sv2::Mining,
     utils::Mutex,
     Error as RolesLogicError,
 };

@@ -1,6 +1,6 @@
 use async_channel::{Receiver, Sender};
 use codec_sv2::StandardEitherFrame;
-use roles_logic_sv2::parsers::AnyMessage;
+use roles_logic_sv2::parsers_sv2::AnyMessage;
 use tracing::debug;
 
 pub type Message = AnyMessage<'static>;
