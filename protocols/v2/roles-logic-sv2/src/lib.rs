@@ -32,6 +32,5 @@ pub use handlers_sv2;
 pub use job_declaration_sv2;
 pub use mining_sv2;
 pub use parsers_sv2;
-pub use handlers_sv2;
 pub use template_distribution_sv2;
 pub use vardiff::{classic::VardiffState, Vardiff};
