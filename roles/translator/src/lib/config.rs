@@ -10,6 +10,8 @@
 //! - Downstream interface address and port ([`DownstreamConfig`])
 //! - Supported protocol versions
 //! - Downstream difficulty adjustment parameters ([`DownstreamDifficultyConfig`])
+use std::path::{PathBuf, Path};
+
 use key_utils::Secp256k1PublicKey;
 use serde::Deserialize;
 
@@ -36,6 +38,8 @@ pub struct TranslatorConfig {
     /// Whether to aggregate all downstream connections into a single upstream channel.
     /// If true, all miners share one channel. If false, each miner gets its own channel.
     pub aggregate_channels: bool,
+    /// The path to the log file for the Translator.
+    log_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -102,7 +106,17 @@ impl TranslatorConfig {
             user_identity,
             downstream_difficulty_config: downstream.difficulty_config,
             aggregate_channels,
+            log_file: None
         }
+    }
+
+    pub fn set_log_dir(&mut self, log_dir: Option<PathBuf>) {
+        if let Some(dir) = log_dir {
+            self.log_file = Some(dir);
+        }
+    }
+    pub fn log_dir(&self) -> Option<&Path> {
+        self.log_file.as_deref()
     }
 }
 

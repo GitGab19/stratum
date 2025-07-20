@@ -25,6 +25,8 @@ pub enum TproxyError {
     RolesSv2LogicError(roles_logic_sv2::Error),
     /// Error from roles logic parser library
     RolesSv2LogicParserError(roles_logic_sv2::parsers_sv2::ParserError),
+    /// Error from roles logic handlers Library
+    RolesSv2LogicHandlerError(roles_logic_sv2::handlers_sv2::HandlerError),
     /// Errors on bad CLI argument input.
     BadCliArgs,
     /// Errors on bad `serde_json` serialize/deserialize.
@@ -120,6 +122,7 @@ impl fmt::Display for TproxyError {
             NetworkHelpersError(ref e) => write!(f, "Network helpers error: {e:?}"),
             RolesSv2LogicError(ref e) => write!(f, "Roles logic error: {e:?}"),
             RolesSv2LogicParserError(ref e) => write!(f, "Roles logic parser error: {e:?}"),
+            RolesSv2LogicHandlerError(ref e) => write!(f, "Roles logic handler error: {e:?}")
         }
     }
 }
@@ -127,6 +130,12 @@ impl fmt::Display for TproxyError {
 impl From<binary_sv2::Error> for TproxyError {
     fn from(e: binary_sv2::Error) -> Self {
         TproxyError::BinarySv2(e)
+    }
+}
+
+impl From<roles_logic_sv2::handlers_sv2::HandlerError> for TproxyError {
+    fn from(value: roles_logic_sv2::handlers_sv2::HandlerError) -> Self {
+        TproxyError::RolesSv2LogicHandlerError(value)
     }
 }
 

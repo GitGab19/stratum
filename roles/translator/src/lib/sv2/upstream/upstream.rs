@@ -11,9 +11,8 @@ use key_utils::Secp256k1PublicKey;
 use network_helpers_sv2::noise_connection::Connection;
 use roles_logic_sv2::{
     common_messages_sv2::{Protocol, SetupConnection},
-    handlers::common::ParseCommonMessagesFromUpstream,
     parsers_sv2::AnyMessage,
-    utils::Mutex,
+    utils::Mutex, handlers_sv2::ParseCommonMessagesFromUpstreamAsync,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
@@ -158,7 +157,7 @@ impl Upstream {
     /// * `Ok(())` - Upstream started successfully
     /// * `Err(TproxyError)` - Error during startup or handshake
     pub async fn start(
-        self,
+        mut self,
         notify_shutdown: broadcast::Sender<ShutdownMessage>,
         shutdown_complete_tx: mpsc::Sender<()>,
         status_sender: Sender<Status>,
@@ -222,7 +221,7 @@ impl Upstream {
     /// # Returns
     /// * `Ok(())` - Handshake completed successfully
     /// * `Err(TproxyError)` - Handshake failed or connection error
-    pub async fn setup_connection(&self) -> Result<(), TproxyError> {
+    pub async fn setup_connection(&mut self) -> Result<(), TproxyError> {
         info!("Upstream: initiating SV2 handshake...");
 
         // Build SetupConnection message
@@ -260,7 +259,7 @@ impl Upstream {
                 }
             };
 
-        let msg_type = incoming
+        let message_type = incoming
             .get_header()
             .ok_or_else(|| {
                 error!("Expected handshake frame but no header found.");
@@ -270,17 +269,7 @@ impl Upstream {
 
         let payload = incoming.payload();
 
-        // Handle the parsed handshake message
-        ParseCommonMessagesFromUpstream::handle_message_common(
-            self.upstream_channel_data.clone(),
-            msg_type,
-            payload,
-        )
-        .map_err(|e| {
-            error!("Failed to handle handshake message from upstream: {:?}", e);
-            TproxyError::UnexpectedMessage
-        })?;
-
+        self.handle_common_message(message_type, payload).await?;
         info!("Upstream: handshake completed successfully.");
         Ok(())
     }
@@ -301,6 +290,7 @@ impl Upstream {
     /// * `Ok(())` - Message processed successfully
     /// * `Err(TproxyError)` - Error processing the message
     pub async fn on_upstream_message(&self, message: EitherFrame) -> Result<(), TproxyError> {
+        let mut upstream = self.get_upstream();
         match message {
             EitherFrame::Sv2(sv2_frame) => {
                 // Convert to standard frame
@@ -310,20 +300,12 @@ impl Upstream {
                 let mut frame: codec_sv2::Frame<AnyMessage<'static>, buffer_sv2::Slice> =
                     std_frame.clone().into();
 
-                let (msg_type, mut payload, parsed_message) = message_from_frame(&mut frame)?;
+                let (messsage_type, mut payload, parsed_message) = message_from_frame(&mut frame)?;
 
                 match parsed_message {
                     AnyMessage::Common(_) => {
                         // Handle common upstream messages
-                        ParseCommonMessagesFromUpstream::handle_message_common(
-                            self.upstream_channel_data.clone(),
-                            msg_type,
-                            payload.as_mut_slice(),
-                        )
-                        .map_err(|e| {
-                            error!("Error handling common upstream message: {:?}", e);
-                            TproxyError::UnexpectedMessage
-                        })?;
+                        upstream.handle_common_message(messsage_type, &mut payload).await?;
                     }
 
                     AnyMessage::Mining(_) => {
@@ -489,5 +471,12 @@ impl Upstream {
             firmware,
             device_id,
         })
+    }
+
+    fn get_upstream(&self) -> Upstream {
+        Upstream {
+            upstream_channel_data: self.upstream_channel_data.clone(),
+            upstream_channel_state: self.upstream_channel_state.clone()
+        }
     }
 }
