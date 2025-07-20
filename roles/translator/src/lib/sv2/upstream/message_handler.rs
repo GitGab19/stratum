@@ -3,39 +3,39 @@ use roles_logic_sv2::{
     common_messages_sv2::{
         ChannelEndpointChanged, Reconnect, SetupConnectionError, SetupConnectionSuccess,
     },
-    handlers_sv2::{ParseCommonMessagesFromUpstreamAsync, HandlerError},
+    handlers_sv2::{HandlerError, ParseCommonMessagesFromUpstreamAsync},
 };
-use tracing::{info, error};
+use tracing::{error, info};
 
 impl ParseCommonMessagesFromUpstreamAsync for Upstream {
     async fn handle_setup_connection_error(
-            &mut self,
-            msg: SetupConnectionError<'_>,
-        ) -> Result<(), HandlerError> {
-            error!(
-                "Received `SetupConnectionError`: version={}, flags={:b}",
-                msg.error_code, msg.flags
-            );
+        &mut self,
+        msg: SetupConnectionError<'_>,
+    ) -> Result<(), HandlerError> {
+        error!(
+            "Received `SetupConnectionError`: version={}, flags={:b}",
+            msg.error_code, msg.flags
+        );
 
-            Ok(())
+        Ok(())
     }
 
     async fn handle_setup_connection_success(
-            &mut self,
-            msg: SetupConnectionSuccess,
-        ) -> Result<(), HandlerError> {
-            info!(
-                "Received `SetupConnectionSuccess`: version={}, flags={:b}",
-                msg.used_version, msg.flags
-            );
+        &mut self,
+        msg: SetupConnectionSuccess,
+    ) -> Result<(), HandlerError> {
+        info!(
+            "Received `SetupConnectionSuccess`: version={}, flags={:b}",
+            msg.used_version, msg.flags
+        );
 
-            Ok(())
+        Ok(())
     }
 
     async fn handle_channel_endpoint_changed(
-            &mut self,
-            msg: ChannelEndpointChanged,
-        ) -> Result<(), HandlerError> {
+        &mut self,
+        msg: ChannelEndpointChanged,
+    ) -> Result<(), HandlerError> {
         info!(
             "Received `ChannelEndpointChanged`: channel_id: {}",
             msg.channel_id

@@ -11,8 +11,9 @@ use key_utils::Secp256k1PublicKey;
 use network_helpers_sv2::noise_connection::Connection;
 use roles_logic_sv2::{
     common_messages_sv2::{Protocol, SetupConnection},
+    handlers_sv2::ParseCommonMessagesFromUpstreamAsync,
     parsers_sv2::AnyMessage,
-    utils::Mutex, handlers_sv2::ParseCommonMessagesFromUpstreamAsync,
+    utils::Mutex,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
@@ -305,7 +306,9 @@ impl Upstream {
                 match parsed_message {
                     AnyMessage::Common(_) => {
                         // Handle common upstream messages
-                        upstream.handle_common_message(messsage_type, &mut payload).await?;
+                        upstream
+                            .handle_common_message(messsage_type, &mut payload)
+                            .await?;
                     }
 
                     AnyMessage::Mining(_) => {
@@ -476,7 +479,7 @@ impl Upstream {
     fn get_upstream(&self) -> Upstream {
         Upstream {
             upstream_channel_data: self.upstream_channel_data.clone(),
-            upstream_channel_state: self.upstream_channel_state.clone()
+            upstream_channel_state: self.upstream_channel_state.clone(),
         }
     }
 }

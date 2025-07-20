@@ -122,7 +122,7 @@ impl fmt::Display for TproxyError {
             NetworkHelpersError(ref e) => write!(f, "Network helpers error: {e:?}"),
             RolesSv2LogicError(ref e) => write!(f, "Roles logic error: {e:?}"),
             RolesSv2LogicParserError(ref e) => write!(f, "Roles logic parser error: {e:?}"),
-            RolesSv2LogicHandlerError(ref e) => write!(f, "Roles logic handler error: {e:?}")
+            RolesSv2LogicHandlerError(ref e) => write!(f, "Roles logic handler error: {e:?}"),
         }
     }
 }

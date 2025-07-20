@@ -12,7 +12,6 @@ use crate::args::process_cli_args;
 /// defined in `translator_sv2::TranslatorSv2`. Errors during startup are logged.
 #[tokio::main]
 async fn main() {
-
     let proxy_config = match process_cli_args() {
         Ok(p) => p,
         Err(e) => panic!("failed to load config: {e}"),

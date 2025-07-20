@@ -10,7 +10,7 @@
 //! - Downstream interface address and port ([`DownstreamConfig`])
 //! - Supported protocol versions
 //! - Downstream difficulty adjustment parameters ([`DownstreamDifficultyConfig`])
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
 use key_utils::Secp256k1PublicKey;
 use serde::Deserialize;
@@ -106,7 +106,7 @@ impl TranslatorConfig {
             user_identity,
             downstream_difficulty_config: downstream.difficulty_config,
             aggregate_channels,
-            log_file: None
+            log_file: None,
         }
     }
 

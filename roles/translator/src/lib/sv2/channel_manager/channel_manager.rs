@@ -15,7 +15,7 @@ use async_channel::{Receiver, Sender};
 use codec_sv2::Frame;
 use roles_logic_sv2::{
     channels_sv2::client::extended::ExtendedChannel,
-    handlers::mining::{ParseMiningMessagesFromUpstream, SendTo},
+    handlers_sv2::ParseMiningMessagesFromUpstreamAsync,
     mining_sv2::OpenExtendedMiningChannelSuccess,
     parsers_sv2::{AnyMessage, Mining},
     utils::Mutex,
@@ -45,8 +45,8 @@ pub type Sv2Message = Mining<'static>;
 /// connections while maintaining proper isolation and state management.
 #[derive(Debug, Clone)]
 pub struct ChannelManager {
-    channel_state: ChannelState,
-    channel_manager_data: Arc<Mutex<ChannelManagerData>>,
+    pub channel_state: ChannelState,
+    pub channel_manager_data: Arc<Mutex<ChannelManagerData>>,
 }
 
 impl ChannelManager {
@@ -157,6 +157,7 @@ impl ChannelManager {
     /// * `Ok(())` - Message processed successfully
     /// * `Err(TproxyError)` - Error processing the message
     pub async fn handle_upstream_message(self: Arc<Self>) -> Result<(), TproxyError> {
+        let mut channel_manager = self.get_channel_manager();
         let message = self
             .channel_state
             .upstream_receiver
@@ -188,131 +189,10 @@ impl ChannelManager {
 
         match message {
             Message::Mining(_) => {
-                let result = ParseMiningMessagesFromUpstream::handle_message_mining(
-                    self.channel_manager_data.clone(),
-                    message_type,
-                    payload.as_mut_slice(),
-                );
-
-                let send_to = match result {
-                    Ok(send_to) => send_to,
-                    Err(e) => {
-                        error!("Failed to handle mining message: {:?}", e);
-                        return Err(TproxyError::RolesSv2LogicError(e));
-                    }
-                };
-
-                match send_to {
-                    SendTo::Respond(response) => {
-                        let msg = Message::Mining(response);
-                        let frame: EitherFrame = StdFrame::try_from(msg)
-                            .map_err(|e| TproxyError::General(format!("Failed to frame: {e}")))?
-                            .into();
-
-                        self.channel_state
-                            .upstream_sender
-                            .send(frame)
-                            .await
-                            .map_err(|e| {
-                                error!("Failed to send response upstream: {:?}", e);
-                                TproxyError::ChannelErrorSender
-                            })?;
-                    }
-
-                    SendTo::None(Some(mining_msg)) => {
-                        use Mining::*;
-
-                        match mining_msg {
-                            SetNewPrevHash(prev_hash) => {
-                                self.channel_state
-                                    .sv1_server_sender
-                                    .send(SetNewPrevHash(prev_hash.clone()))
-                                    .await
-                                    .map_err(|e| {
-                                        error!("Failed to send SetNewPrevHash: {:?}", e);
-                                        TproxyError::ChannelErrorSender
-                                    })?;
-
-                                let mode = self
-                                    .channel_manager_data
-                                    .super_safe_lock(|c| c.mode.clone());
-
-                                let active_job = if mode == ChannelMode::Aggregated {
-                                    self.channel_manager_data.super_safe_lock(|c| {
-                                        c.upstream_extended_channel
-                                            .as_ref()
-                                            .and_then(|ch| ch.read().ok())
-                                            .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
-                                    })
-                                } else {
-                                    self.channel_manager_data.super_safe_lock(|c| {
-                                        c.extended_channels
-                                            .get(&prev_hash.channel_id)
-                                            .and_then(|ch| ch.read().ok())
-                                            .and_then(|ch| ch.get_active_job().map(|j| j.0.clone()))
-                                    })
-                                };
-
-                                if let Some(mut job) = active_job {
-                                    if mode == ChannelMode::Aggregated {
-                                        job.channel_id = 0;
-                                    }
-                                    self.channel_state
-                                        .sv1_server_sender
-                                        .send(NewExtendedMiningJob(job))
-                                        .await
-                                        .map_err(|e| {
-                                            error!("Failed to send NewExtendedMiningJob: {:?}", e);
-                                            TproxyError::ChannelErrorSender
-                                        })?;
-                                }
-                            }
-
-                            NewExtendedMiningJob(job) => {
-                                if !job.is_future() {
-                                    self.channel_state
-                                        .sv1_server_sender
-                                        .send(NewExtendedMiningJob(job))
-                                        .await
-                                        .map_err(|e| {
-                                            error!("Failed to send immediate NewExtendedMiningJob: {:?}", e);
-                                            TproxyError::ChannelErrorSender
-                                        })?;
-                                }
-                            }
-
-                            OpenExtendedMiningChannelSuccess(success) => {
-                                self.channel_state
-                                    .sv1_server_sender
-                                    .send(OpenExtendedMiningChannelSuccess(success.clone()))
-                                    .await
-                                    .map_err(|e| {
-                                        error!(
-                                            "Failed to send OpenExtendedMiningChannelSuccess: {:?}",
-                                            e
-                                        );
-                                        TproxyError::ChannelErrorSender
-                                    })?;
-                            }
-
-                            OpenMiningChannelError(_) => {
-                                // TODO: Implement proper handler
-                                todo!("OpenMiningChannelError not handled yet");
-                            }
-
-                            _ => {
-                                // Unsupported mining message type
-                                unreachable!("Unexpected mining message variant received");
-                            }
-                        }
-                    }
-
-                    _ => {
-                        // No action needed
-                    }
-                }
+                channel_manager
+                    .handle_mining_message(message_type, &mut payload)
+                    .await?;
             }
-
             _ => {
                 warn!("Unhandled upstream message type: {:?}", message);
             }
@@ -592,5 +472,12 @@ impl ChannelManager {
         }
 
         Ok(())
+    }
+
+    pub fn get_channel_manager(&self) -> ChannelManager {
+        ChannelManager {
+            channel_manager_data: self.channel_manager_data.clone(),
+            channel_state: self.channel_state.clone(),
+        }
     }
 }
