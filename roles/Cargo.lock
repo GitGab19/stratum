@@ -2797,6 +2797,7 @@ dependencies = [
  "async-recursion 0.3.2",
  "binary_sv2",
  "buffer_sv2",
+ "clap",
  "codec_sv2",
  "config",
  "config-helpers",
