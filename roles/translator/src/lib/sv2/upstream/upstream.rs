@@ -232,7 +232,7 @@ impl Upstream {
                 .try_into()
                 .map_err(|e| {
                     error!("Failed to serialize SetupConnection message: {:?}", e);
-                    TproxyError::RolesSv2LogicParserError(e)
+                    TproxyError::ParserError(e)
                 })?;
 
         // Send SetupConnection message to upstream

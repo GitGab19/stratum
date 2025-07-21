@@ -17,7 +17,7 @@ impl ParseCommonMessagesFromUpstreamAsync for Upstream {
             msg.error_code, msg.flags
         );
 
-        Ok(())
+        todo!()
     }
 
     async fn handle_setup_connection_success(
@@ -41,7 +41,7 @@ impl ParseCommonMessagesFromUpstreamAsync for Upstream {
             msg.channel_id
         );
 
-        Ok(())
+        todo!()
     }
 
     async fn handle_reconnect(&mut self, msg: Reconnect<'_>) -> Result<(), HandlerError> {
@@ -49,6 +49,6 @@ impl ParseCommonMessagesFromUpstreamAsync for Upstream {
             "Received `Reconnect`: new_host: {}, new_port: {}",
             msg.new_host, msg.new_port
         );
-        Ok(())
+        todo!()
     }
 }

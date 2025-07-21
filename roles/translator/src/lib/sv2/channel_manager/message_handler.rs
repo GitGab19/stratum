@@ -2,10 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::{
     sv1::downstream::downstream::Downstream,
-    sv2::{
-        channel_manager::ChannelMode,
-        ChannelManager,
-    },
+    sv2::{channel_manager::ChannelMode, ChannelManager},
     utils::proxy_extranonce_prefix_len,
 };
 use roles_logic_sv2::{
@@ -159,7 +156,7 @@ impl ParseMiningMessagesFromUpstreamAsync<Downstream> for ChannelManager {
             "Received UpdateChannelError with error code {}",
             std::str::from_utf8(m.error_code.as_ref()).unwrap_or("unknown error code")
         );
-        Ok(())
+        todo!()
     }
 
     async fn handle_close_channel(
