@@ -79,6 +79,8 @@ pub enum TproxyError {
     General(String),
 }
 
+impl std::error::Error for TproxyError {}
+
 impl fmt::Display for TproxyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TproxyError::*;

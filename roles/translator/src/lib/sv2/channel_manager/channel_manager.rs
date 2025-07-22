@@ -380,7 +380,7 @@ impl ChannelManager {
                         open_channel_msg,
                     ),
                 ))
-                .map_err(TproxyError::RolesSv2LogicParserError)?;
+                .map_err(TproxyError::ParserError)?;
                 self.channel_state
                     .upstream_sender
                     .send(frame.into())
@@ -456,7 +456,7 @@ impl ChannelManager {
                     }
                     let frame: StdFrame = Message::Mining(Mining::SubmitSharesExtended(m))
                         .try_into()
-                        .map_err(TproxyError::RolesSv2LogicParserError)?;
+                        .map_err(TproxyError::ParserError)?;
                     let frame: EitherFrame = frame.into();
                     self.channel_state
                         .upstream_sender

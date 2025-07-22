@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::{
+    error::TproxyError,
     sv1::downstream::downstream::Downstream,
     sv2::{channel_manager::ChannelMode, ChannelManager},
     utils::proxy_extranonce_prefix_len,
@@ -131,7 +132,7 @@ impl ParseMiningMessagesFromUpstreamAsync<Downstream> for ChannelManager {
             .await
             .map_err(|e| {
                 error!("Failed to send OpenExtendedMiningChannelSuccess: {:?}", e);
-                HandlerError::ChannelErrorSender
+                HandlerError::External(Box::new(TproxyError::ChannelErrorSender))
             })?;
 
         Ok(())
@@ -251,7 +252,7 @@ impl ParseMiningMessagesFromUpstreamAsync<Downstream> for ChannelManager {
                 .await
                 .map_err(|e| {
                     error!("Failed to send immediate NewExtendedMiningJob: {:?}", e);
-                    HandlerError::ChannelErrorSender
+                    HandlerError::External(Box::new(TproxyError::ChannelErrorSender))
                 })?;
         }
         Ok(())
@@ -297,7 +298,7 @@ impl ParseMiningMessagesFromUpstreamAsync<Downstream> for ChannelManager {
             .await
             .map_err(|e| {
                 error!("Failed to send SetNewPrevHash: {:?}", e);
-                HandlerError::ChannelErrorSender
+                HandlerError::External(Box::new(TproxyError::ChannelErrorSender))
             })?;
 
         let mode = self
@@ -330,7 +331,7 @@ impl ParseMiningMessagesFromUpstreamAsync<Downstream> for ChannelManager {
                 .await
                 .map_err(|e| {
                     error!("Failed to send NewExtendedMiningJob: {:?}", e);
-                    HandlerError::ChannelErrorSender
+                    HandlerError::External(Box::new(TproxyError::ChannelErrorSender))
                 })?;
         }
         Ok(())
