@@ -554,7 +554,37 @@ impl ChannelManager {
                         TproxyError::ChannelErrorSender
                     })?;
             }
-            _ => {}
+            Mining::CloseChannel(m) => {
+                // Extract channel_id before move
+                let channel_id = m.channel_id;
+                info!("Received CloseChannel from SV1Server: channel_id={}", channel_id);
+                
+                // Forward CloseChannel message to upstream
+                let frame = StdFrame::try_from(Message::Mining(
+                    roles_logic_sv2::parsers_sv2::Mining::CloseChannel(m),
+                ))
+                .map_err(TproxyError::ParserError)?;
+
+                self.channel_state
+                    .upstream_sender
+                    .send(frame.into())
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to send CloseChannel message to upstream: {:?}", e);
+                        TproxyError::ChannelErrorSender
+                    })?;
+                
+                // Clean up the channel from our local state
+                let mode = self.channel_manager_data.super_safe_lock(|c| c.mode.clone());
+                if mode == ChannelMode::NonAggregated {
+                    self.channel_manager_data.super_safe_lock(|c| {
+                        c.extended_channels.remove(&channel_id);
+                    });
+                }
+            }
+            _ => {
+                warn!("Unhandled downstream message: {:?}", message);
+            }
         }
 
         Ok(())

@@ -179,6 +179,13 @@ impl Sv1Server {
                             break;
                         }
                         Ok(ShutdownMessage::DownstreamShutdown(downstream_id)) => {
+                            // Get channel_id before removing the downstream (needed for CloseChannel)
+                            let channel_id = self.sv1_server_data.super_safe_lock(|d| {
+                                d.downstreams.get(&downstream_id).and_then(|downstream| {
+                                    downstream.downstream_data.super_safe_lock(|data| data.channel_id)
+                                })
+                            });
+
                             let current_downstream = self.sv1_server_data.super_safe_lock(|d| {
                                 // Only remove from vardiff map if vardiff is enabled
                                 if self.config.downstream_difficulty_config.enable_vardiff {
@@ -189,13 +196,33 @@ impl Sv1Server {
                             if current_downstream.is_some() {
                                 info!("🔌 Downstream: {downstream_id} disconnected and removed from sv1 server downstreams");
 
-                                // In aggregated mode, send UpdateChannel to reflect the new state (only if vardiff enabled)
-                                if self.config.downstream_difficulty_config.enable_vardiff {
-                                    DifficultyManager::send_update_channel_on_downstream_state_change(
-                                        &self.sv1_server_data,
-                                        &self.sv1_server_channel_state.channel_manager_sender,
-                                        self.config.aggregate_channels,
-                                    ).await;
+                                if self.config.aggregate_channels {
+                                    // In aggregated mode, send UpdateChannel to reflect the new state (only if vardiff enabled)
+                                    if self.config.downstream_difficulty_config.enable_vardiff {
+                                        DifficultyManager::send_update_channel_on_downstream_state_change(
+                                            &self.sv1_server_data,
+                                            &self.sv1_server_channel_state.channel_manager_sender,
+                                            self.config.aggregate_channels,
+                                        ).await;
+                                    }
+                                } else {
+                                    // In non-aggregated mode, send CloseChannel upstream
+                                    if let Some(channel_id) = channel_id {
+                                        let close_channel = roles_logic_sv2::mining_sv2::CloseChannel {
+                                            channel_id,
+                                            reason_code: "Downstream disconnected".to_string().try_into().unwrap(),
+                                        };
+                                        
+                                        info!("Sending CloseChannel for channel_id: {} (downstream: {})", channel_id, downstream_id);
+                                        if let Err(e) = self.sv1_server_channel_state.channel_manager_sender
+                                            .send(roles_logic_sv2::parsers_sv2::Mining::CloseChannel(close_channel))
+                                            .await 
+                                        {
+                                            error!("Failed to send CloseChannel for downstream {}: {:?}", downstream_id, e);
+                                        }
+                                    } else {
+                                        debug!("No channel_id found for downstream {} - channel may not have been opened yet", downstream_id);
+                                    }
                                 }
                             }
                         }

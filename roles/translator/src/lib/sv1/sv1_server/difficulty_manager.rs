@@ -64,20 +64,21 @@ impl DifficultyManager {
                             break 'vardiff_loop;
                         }
                         Ok(ShutdownMessage::DownstreamShutdown(downstream_id)) => {
-                            let current_downstream = sv1_server_data.super_safe_lock(|d| {
-                                // Also remove from vardiff map
-                                d.vardiff.remove(&downstream_id);
-                                d.downstreams.remove(&downstream_id)
+                            // Only remove from vardiff map - let main SV1 server handle downstream removal and CloseChannel
+                            let was_present = sv1_server_data.super_safe_lock(|d| {
+                                d.vardiff.remove(&downstream_id).is_some()
                             });
-                            if current_downstream.is_some() {
-                                info!("🔌 Downstream: {downstream_id} disconnected and removed from sv1 server downstreams");
-
+                            if was_present {
+                                debug!("DifficultyManager: Removed downstream {} from vardiff map", downstream_id);
+                                
                                 // In aggregated mode, send UpdateChannel to reflect the new state
-                                Self::send_update_channel_on_downstream_state_change(
-                                    &sv1_server_data,
-                                    &channel_manager_sender,
-                                    is_aggregated,
-                                ).await;
+                                if is_aggregated {
+                                    Self::send_update_channel_on_downstream_state_change(
+                                        &sv1_server_data,
+                                        &channel_manager_sender,
+                                        is_aggregated,
+                                    ).await;
+                                }
                             }
                         }
                         Ok(ShutdownMessage::DownstreamShutdownAll) => {
