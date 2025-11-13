@@ -1,5 +1,6 @@
 use crate::error::HandlerErrorType;
 use binary_sv2::Str0255;
+use framing_sv2::header::Header;
 use mining_sv2::{
     CloseChannel, NewExtendedMiningJob, NewMiningJob, OpenExtendedMiningChannel,
     OpenExtendedMiningChannelSuccess, OpenMiningChannelError, OpenStandardMiningChannel,
@@ -8,7 +9,7 @@ use mining_sv2::{
     SubmitSharesError, SubmitSharesExtended, SubmitSharesStandard, SubmitSharesSuccess,
     UpdateChannel, UpdateChannelError,
 };
-use parsers_sv2::{parse_mining_message_with_tlvs, Mining, Tlv};
+use parsers_sv2::{parse_message_frame_with_tlvs, AnyMessage, Mining, Tlv};
 
 use mining_sv2::*;
 
@@ -48,7 +49,7 @@ pub trait HandleMiningMessagesFromServerSync {
     fn handle_mining_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_server(server_id);
@@ -98,6 +99,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_open_standard_mining_channel_success(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_OPEN_STANDARD_MINING_CHANNEL_SUCCESS,
                 )),
             },
@@ -106,6 +108,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_open_extended_mining_channel_success(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_OPEN_EXTENDED_MINING_CHANNEL_SUCCESS,
                 )),
             },
@@ -123,7 +126,10 @@ pub trait HandleMiningMessagesFromServerSync {
                 SupportedChannelTypes::Standard => {
                     self.handle_new_mining_job(server_id, m, tlv_fields)
                 }
-                _ => Err(Self::Error::unexpected_message(MESSAGE_TYPE_NEW_MINING_JOB)),
+                _ => Err(Self::Error::unexpected_message(
+                    0,
+                    MESSAGE_TYPE_NEW_MINING_JOB,
+                )),
             },
             NewExtendedMiningJob(m) => match channel_type {
                 SupportedChannelTypes::Extended
@@ -132,6 +138,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_new_extended_mining_job(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_NEW_EXTENDED_MINING_JOB,
                 )),
             },
@@ -144,6 +151,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_set_custom_mining_job_success(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SET_CUSTOM_MINING_JOB_SUCCESS,
                 )),
             },
@@ -154,6 +162,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_set_custom_mining_job_error(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SET_CUSTOM_MINING_JOB_ERROR,
                 )),
             },
@@ -165,6 +174,7 @@ pub trait HandleMiningMessagesFromServerSync {
                     self.handle_set_group_channel(server_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SET_GROUP_CHANNEL,
                 )),
             },
@@ -331,7 +341,7 @@ pub trait HandleMiningMessagesFromServerAsync {
     async fn handle_mining_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -388,6 +398,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_OPEN_STANDARD_MINING_CHANNEL_SUCCESS,
                     )),
                 },
@@ -397,6 +408,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_OPEN_EXTENDED_MINING_CHANNEL_SUCCESS,
                     )),
                 },
@@ -426,7 +438,10 @@ pub trait HandleMiningMessagesFromServerAsync {
                     SupportedChannelTypes::Standard => {
                         self.handle_new_mining_job(server_id, m, tlv_fields).await
                     }
-                    _ => Err(Self::Error::unexpected_message(MESSAGE_TYPE_NEW_MINING_JOB)),
+                    _ => Err(Self::Error::unexpected_message(
+                        0,
+                        MESSAGE_TYPE_NEW_MINING_JOB,
+                    )),
                 },
                 NewExtendedMiningJob(m) => match channel_type {
                     SupportedChannelTypes::Extended
@@ -436,6 +451,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_NEW_EXTENDED_MINING_JOB,
                     )),
                 },
@@ -452,6 +468,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SET_CUSTOM_MINING_JOB_SUCCESS,
                     )),
                 },
@@ -463,6 +480,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SET_CUSTOM_MINING_JOB_ERROR,
                     )),
                 },
@@ -475,6 +493,7 @@ pub trait HandleMiningMessagesFromServerAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SET_GROUP_CHANNEL,
                     )),
                 },
@@ -646,7 +665,7 @@ pub trait HandleMiningMessagesFromClientSync {
     fn handle_mining_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_client(client_id);
@@ -696,6 +715,7 @@ pub trait HandleMiningMessagesFromClientSync {
                     self.handle_open_standard_mining_channel(client_id, m, tlv_fields)
                 }
                 SupportedChannelTypes::Extended => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_OPEN_STANDARD_MINING_CHANNEL,
                 )),
             },
@@ -704,6 +724,7 @@ pub trait HandleMiningMessagesFromClientSync {
                     self.handle_open_extended_mining_channel(client_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_OPEN_EXTENDED_MINING_CHANNEL,
                 )),
             },
@@ -716,6 +737,7 @@ pub trait HandleMiningMessagesFromClientSync {
                     self.handle_submit_shares_standard(client_id, m, tlv_fields)
                 }
                 SupportedChannelTypes::Extended => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SUBMIT_SHARES_STANDARD,
                 )),
             },
@@ -724,6 +746,7 @@ pub trait HandleMiningMessagesFromClientSync {
                     self.handle_submit_shares_extended(client_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SUBMIT_SHARES_EXTENDED,
                 )),
             },
@@ -733,6 +756,7 @@ pub trait HandleMiningMessagesFromClientSync {
                     self.handle_set_custom_mining_job(client_id, m, tlv_fields)
                 }
                 _ => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SET_CUSTOM_MINING_JOB,
                 )),
             },
@@ -878,7 +902,7 @@ pub trait HandleMiningMessagesFromClientAsync {
     async fn handle_mining_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -935,6 +959,7 @@ pub trait HandleMiningMessagesFromClientAsync {
                             .await
                     }
                     SupportedChannelTypes::Extended => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_OPEN_STANDARD_MINING_CHANNEL,
                     )),
                 },
@@ -944,6 +969,7 @@ pub trait HandleMiningMessagesFromClientAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_OPEN_EXTENDED_MINING_CHANNEL,
                     )),
                 },
@@ -957,6 +983,7 @@ pub trait HandleMiningMessagesFromClientAsync {
                             .await
                     }
                     SupportedChannelTypes::Extended => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SUBMIT_SHARES_STANDARD,
                     )),
                 },
@@ -966,6 +993,7 @@ pub trait HandleMiningMessagesFromClientAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SUBMIT_SHARES_EXTENDED,
                     )),
                 },
@@ -976,6 +1004,7 @@ pub trait HandleMiningMessagesFromClientAsync {
                             .await
                     }
                     _ => Err(Self::Error::unexpected_message(
+                        0,
                         MESSAGE_TYPE_SET_CUSTOM_MINING_JOB,
                     )),
                 },

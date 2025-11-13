@@ -1,5 +1,6 @@
 use extensions_sv2::{RequestExtensions, RequestExtensionsError, RequestExtensionsSuccess};
-use parsers_sv2::{parse_extensions_message_with_tlvs, Extensions, Tlv};
+use framing_sv2::header::Header;
+use parsers_sv2::{parse_message_frame_with_tlvs, AnyMessage, Extensions, Tlv};
 
 use crate::error::HandlerErrorType;
 
@@ -31,8 +32,7 @@ pub trait HandleExtensionsFromServerSync {
     fn handle_extensions_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        extension_type: u16,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_server(server_id);
@@ -79,6 +79,7 @@ pub trait HandleExtensionsFromServerSync {
                 // RequestExtensions is sent by client, not server
                 parsers_sv2::ExtensionsNegotiation::RequestExtensions(_) => {
                     Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                         extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS,
                     ))
                 }
@@ -130,8 +131,7 @@ pub trait HandleExtensionsFromServerAsync {
     async fn handle_extensions_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        extension_type: u16,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -190,6 +190,7 @@ pub trait HandleExtensionsFromServerAsync {
                     // RequestExtensions is sent by client, not server
                     parsers_sv2::ExtensionsNegotiation::RequestExtensions(_) => {
                         Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                             extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS,
                         ))
                     }
@@ -241,8 +242,7 @@ pub trait HandleExtensionsFromClientSync {
     fn handle_extensions_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        extension_type: u16,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_client(client_id);
@@ -286,11 +286,13 @@ pub trait HandleExtensionsFromClientSync {
                 // Success/Error are sent by server, not client
                 parsers_sv2::ExtensionsNegotiation::RequestExtensionsSuccess(_) => {
                     Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                         extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS_SUCCESS,
                     ))
                 }
                 parsers_sv2::ExtensionsNegotiation::RequestExtensionsError(_) => {
                     Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                         extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS_ERROR,
                     ))
                 }
@@ -335,8 +337,7 @@ pub trait HandleExtensionsFromClientAsync {
     async fn handle_extensions_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        extension_type: u16,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -391,11 +392,13 @@ pub trait HandleExtensionsFromClientAsync {
                     // Success/Error are sent by server, not client
                     parsers_sv2::ExtensionsNegotiation::RequestExtensionsSuccess(_) => {
                         Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                             extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS_SUCCESS,
                         ))
                     }
                     parsers_sv2::ExtensionsNegotiation::RequestExtensionsError(_) => {
                         Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
                             extensions_sv2::MESSAGE_TYPE_REQUEST_EXTENSIONS_ERROR,
                         ))
                     }

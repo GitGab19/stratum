@@ -1,4 +1,5 @@
-use parsers_sv2::{parse_template_distribution_message_with_tlvs, TemplateDistribution, Tlv};
+use framing_sv2::header::Header;
+use parsers_sv2::{parse_message_frame_with_tlvs, AnyMessage, TemplateDistribution, Tlv};
 use template_distribution_sv2::*;
 use template_distribution_sv2::{
     CoinbaseOutputConstraints, NewTemplate, RequestTransactionData, RequestTransactionDataError,
@@ -35,7 +36,7 @@ pub trait HandleTemplateDistributionMessagesFromServerSync {
     fn handle_template_distribution_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_server(server_id);
@@ -89,12 +90,13 @@ pub trait HandleTemplateDistributionMessagesFromServerSync {
             }
 
             TemplateDistribution::CoinbaseOutputConstraints(_) => Err(
-                Self::Error::unexpected_message(MESSAGE_TYPE_COINBASE_OUTPUT_CONSTRAINTS),
+                Self::Error::unexpected_message(0, MESSAGE_TYPE_COINBASE_OUTPUT_CONSTRAINTS),
             ),
             TemplateDistribution::RequestTransactionData(_) => Err(
-                Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA),
+                Self::Error::unexpected_message(0, MESSAGE_TYPE_REQUEST_TRANSACTION_DATA),
             ),
             TemplateDistribution::SubmitSolution(_) => Err(Self::Error::unexpected_message(
+                0,
                 MESSAGE_TYPE_SUBMIT_SOLUTION,
             )),
         }
@@ -157,7 +159,7 @@ pub trait HandleTemplateDistributionMessagesFromServerAsync {
     async fn handle_template_distribution_message_frame_from_server(
         &mut self,
         server_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -221,12 +223,13 @@ pub trait HandleTemplateDistributionMessagesFromServerAsync {
                 }
 
                 TemplateDistribution::CoinbaseOutputConstraints(_) => Err(
-                    Self::Error::unexpected_message(MESSAGE_TYPE_COINBASE_OUTPUT_CONSTRAINTS),
+                    Self::Error::unexpected_message(0, MESSAGE_TYPE_COINBASE_OUTPUT_CONSTRAINTS),
                 ),
                 TemplateDistribution::RequestTransactionData(_) => Err(
-                    Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA),
+                    Self::Error::unexpected_message(0, MESSAGE_TYPE_REQUEST_TRANSACTION_DATA),
                 ),
                 TemplateDistribution::SubmitSolution(_) => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SUBMIT_SOLUTION,
                 )),
             }
@@ -289,7 +292,7 @@ pub trait HandleTemplateDistributionMessagesFromClientSync {
     fn handle_template_distribution_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         let negotiated_extensions = self.get_negotiated_extensions_with_client(client_id);
@@ -339,17 +342,19 @@ pub trait HandleTemplateDistributionMessagesFromClientSync {
                 self.handle_submit_solution(client_id, m, tlv_fields)
             }
 
-            TemplateDistribution::NewTemplate(_) => {
-                Err(Self::Error::unexpected_message(MESSAGE_TYPE_NEW_TEMPLATE))
-            }
+            TemplateDistribution::NewTemplate(_) => Err(Self::Error::unexpected_message(
+                0,
+                MESSAGE_TYPE_NEW_TEMPLATE,
+            )),
             TemplateDistribution::SetNewPrevHash(_) => Err(Self::Error::unexpected_message(
+                0,
                 MESSAGE_TYPE_SET_NEW_PREV_HASH,
             )),
             TemplateDistribution::RequestTransactionDataSuccess(_) => Err(
-                Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_SUCCESS),
+                Self::Error::unexpected_message(0, MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_SUCCESS),
             ),
             TemplateDistribution::RequestTransactionDataError(_) => Err(
-                Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_ERROR),
+                Self::Error::unexpected_message(0, MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_ERROR),
             ),
         }
     }
@@ -404,7 +409,7 @@ pub trait HandleTemplateDistributionMessagesFromClientAsync {
     async fn handle_template_distribution_message_frame_from_client(
         &mut self,
         client_id: Option<usize>,
-        message_type: u8,
+        header: Header,
         payload: &mut [u8],
     ) -> Result<(), Self::Error> {
         async move {
@@ -462,17 +467,22 @@ pub trait HandleTemplateDistributionMessagesFromClientAsync {
                     self.handle_submit_solution(client_id, m, tlv_fields).await
                 }
 
-                TemplateDistribution::NewTemplate(_) => {
-                    Err(Self::Error::unexpected_message(MESSAGE_TYPE_NEW_TEMPLATE))
-                }
+                TemplateDistribution::NewTemplate(_) => Err(Self::Error::unexpected_message(
+                    0,
+                    MESSAGE_TYPE_NEW_TEMPLATE,
+                )),
                 TemplateDistribution::SetNewPrevHash(_) => Err(Self::Error::unexpected_message(
+                    0,
                     MESSAGE_TYPE_SET_NEW_PREV_HASH,
                 )),
-                TemplateDistribution::RequestTransactionDataSuccess(_) => Err(
-                    Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_SUCCESS),
-                ),
+                TemplateDistribution::RequestTransactionDataSuccess(_) => {
+                    Err(Self::Error::unexpected_message(
+                        0,
+                        MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_SUCCESS,
+                    ))
+                }
                 TemplateDistribution::RequestTransactionDataError(_) => Err(
-                    Self::Error::unexpected_message(MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_ERROR),
+                    Self::Error::unexpected_message(0, MESSAGE_TYPE_REQUEST_TRANSACTION_DATA_ERROR),
                 ),
             }
         }
