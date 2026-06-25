@@ -110,6 +110,7 @@ pub struct SetCustomMiningJobError<'decoder> {
     /// - invalid-mining-job-token
     /// - job-not-yet-validated
     /// - stale-chain-tip
+    /// - stale-payout-outputs
     /// - invalid-min-ntime
     /// - invalid-nbits
     /// - invalid-version

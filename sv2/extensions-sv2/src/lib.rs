@@ -8,18 +8,22 @@
 //!   which optional extensions are supported during connection setup.
 //! - **Worker-Specific Hashrate Tracking** (extension_type=0x0002): Enables tracking per-worker hashrates
 //!   within extended channels via TLV fields.
+//! - **Non-Custodial Pool Payouts** (extension_type=0x0003): Allows JDCs to request
+//!   coinbase payout outputs from JDSs.
 //!
 //! ## Architecture
 //!
 //! The crate is organized into:
 //! - `extensions_negotiation`: Extension negotiation protocol
 //! - `worker_specific_hashrate_tracking`: Worker-Specific Hashrate Tracking extension
+//! - `non_custodial_pool_payouts`: Non-Custodial Pool Payouts extension
 //!
 //! TLV encoding/decoding utilities are provided by the `parsers_sv2` crate.
 //!
 //! For further information about the extensions, please refer to:
 //! - [Extensions Negotiation Spec](https://github.com/stratum-mining/sv2-spec/blob/main/extensions/extensions-negotiation.md)
 //! - [Worker-Specific Hashrate Tracking Spec](https://github.com/stratum-mining/sv2-spec/blob/main/extensions/worker-specific-hashrate-tracking.md)
+//! - [Non-Custodial Pool Payouts Spec](https://github.com/stratum-mining/sv2-spec/blob/main/extensions/0x0003-non-custodial-pool-payouts.md)
 
 #![no_std]
 
@@ -30,6 +34,9 @@ pub mod extensions_negotiation;
 
 // Worker-Specific Hashrate Tracking (0x0002)
 pub mod worker_specific_hashrate_tracking;
+
+// Non-Custodial Pool Payouts (0x0003)
+pub mod non_custodial_pool_payouts;
 
 // Re-export commonly used items from extensions_negotiation
 pub use extensions_negotiation::{
@@ -44,4 +51,14 @@ pub use extensions_negotiation::{
 pub use worker_specific_hashrate_tracking::{
     UserIdentity, EXTENSION_TYPE as EXTENSION_TYPE_WORKER_HASHRATE_TRACKING,
     FIELD_TYPE_USER_IDENTITY as TLV_FIELD_TYPE_USER_IDENTITY, MAX_USER_IDENTITY_LENGTH,
+};
+
+// Re-export commonly used items from non_custodial_pool_payouts
+pub use non_custodial_pool_payouts::{
+    RequestPayoutOutputs, RequestPayoutOutputsError, RequestPayoutOutputsSuccess,
+    CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS, CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS_ERROR,
+    CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS_SUCCESS, ERROR_CODE_STALE_PAYOUT_OUTPUTS,
+    EXTENSION_TYPE as EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+    MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS, MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+    MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
 };

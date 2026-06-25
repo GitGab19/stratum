@@ -54,4 +54,5 @@ pub const ERROR_CODE_DECLARE_MINING_JOB_INVALID_COINBASE_TX_INPUT: &str =
     "invalid-coinbase-tx-input";
 pub const ERROR_CODE_DECLARE_MINING_JOB_INTERNAL_ERROR: &str = "internal-error";
 pub const ERROR_CODE_DECLARE_MINING_JOB_STALE_CHAIN_TIP: &str = "stale-chain-tip";
+pub const ERROR_CODE_DECLARE_MINING_JOB_STALE_PAYOUT_OUTPUTS: &str = "stale-payout-outputs";
 pub const ERROR_CODE_DECLARE_MINING_JOB_INVALID_JOB: &str = "invalid-job";

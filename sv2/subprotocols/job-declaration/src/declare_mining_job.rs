@@ -100,6 +100,7 @@ pub struct DeclareMiningJobError<'decoder> {
     /// - invalid-coinbase-tx-input
     /// - internal-error
     /// - stale-chain-tip
+    /// - stale-payout-outputs
     /// - invalid-job
     pub error_code: Str0255<'decoder>,
     /// Optional details about the error.

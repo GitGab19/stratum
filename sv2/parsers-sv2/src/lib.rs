@@ -53,7 +53,10 @@ use common_messages_sv2::{
     ChannelEndpointChanged, Reconnect, SetupConnection, SetupConnectionError,
     SetupConnectionSuccess,
 };
-use extensions_sv2::{RequestExtensions, RequestExtensionsError, RequestExtensionsSuccess};
+use extensions_sv2::{
+    RequestExtensions, RequestExtensionsError, RequestExtensionsSuccess, RequestPayoutOutputs,
+    RequestPayoutOutputsError, RequestPayoutOutputsSuccess,
+};
 use job_declaration_sv2::{
     AllocateMiningJobToken, AllocateMiningJobTokenSuccess, DeclareMiningJob, DeclareMiningJobError,
     DeclareMiningJobSuccess, ProvideMissingTransactions, ProvideMissingTransactionsSuccess,
@@ -458,6 +461,44 @@ impl ExtensionsNegotiation<'_> {
     }
 }
 
+/// Non-Custodial Pool Payouts extension messages (extension_type=0x0003).
+///
+/// These messages allow a Job Declaration Client to request coinbase payout outputs
+/// from a Job Declaration Server.
+#[derive(Clone, Debug)]
+pub enum NonCustodialPoolPayouts<'a> {
+    RequestPayoutOutputs(RequestPayoutOutputs<'a>),
+    RequestPayoutOutputsSuccess(RequestPayoutOutputsSuccess<'a>),
+    RequestPayoutOutputsError(RequestPayoutOutputsError<'a>),
+}
+
+impl fmt::Display for NonCustodialPoolPayouts<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NonCustodialPoolPayouts::RequestPayoutOutputs(m) => write!(f, "{m}"),
+            NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(m) => write!(f, "{m}"),
+            NonCustodialPoolPayouts::RequestPayoutOutputsError(m) => write!(f, "{m}"),
+        }
+    }
+}
+
+impl NonCustodialPoolPayouts<'_> {
+    /// converter into static lifetime
+    pub fn into_static(self) -> NonCustodialPoolPayouts<'static> {
+        match self {
+            NonCustodialPoolPayouts::RequestPayoutOutputs(m) => {
+                NonCustodialPoolPayouts::RequestPayoutOutputs(m.into_static())
+            }
+            NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(m) => {
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(m.into_static())
+            }
+            NonCustodialPoolPayouts::RequestPayoutOutputsError(m) => {
+                NonCustodialPoolPayouts::RequestPayoutOutputsError(m.into_static())
+            }
+        }
+    }
+}
+
 /// Extensions protocol messages for negotiating optional protocol features.
 ///
 /// This enum represents messages from the SV2 Extensions protocol (channel_msg=0x04),
@@ -468,18 +509,22 @@ impl ExtensionsNegotiation<'_> {
 ///
 /// ## Supported Extension Types
 /// - **Extensions Negotiation (0x0001)**: Basic extension negotiation protocol
+/// - **Non-Custodial Pool Payouts (0x0003)**: JDC/JDS payout output discovery
 ///
 /// Future extension types will be added as new variants (e.g., Worker Hashrate Tracking).
 #[derive(Clone, Debug)]
 pub enum Extensions<'a> {
     /// Extensions Negotiation messages (extension_type=0x0001)
     ExtensionsNegotiation(ExtensionsNegotiation<'a>),
+    /// Non-Custodial Pool Payouts messages (extension_type=0x0003)
+    NonCustodialPoolPayouts(NonCustodialPoolPayouts<'a>),
 }
 
 impl fmt::Display for Extensions<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Extensions::ExtensionsNegotiation(m) => write!(f, "{m}"),
+            Extensions::NonCustodialPoolPayouts(m) => write!(f, "{m}"),
         }
     }
 }
@@ -490,6 +535,9 @@ impl Extensions<'_> {
         match self {
             Extensions::ExtensionsNegotiation(m) => {
                 Extensions::ExtensionsNegotiation(m.into_static())
+            }
+            Extensions::NonCustodialPoolPayouts(m) => {
+                Extensions::NonCustodialPoolPayouts(m.into_static())
             }
         }
     }
@@ -713,6 +761,17 @@ impl IsSv2Message for Extensions<'_> {
                     MESSAGE_TYPE_REQUEST_EXTENSIONS_ERROR
                 }
             },
+            Self::NonCustodialPoolPayouts(m) => match m {
+                NonCustodialPoolPayouts::RequestPayoutOutputs(_) => {
+                    MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS
+                }
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(_) => {
+                    MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS
+                }
+                NonCustodialPoolPayouts::RequestPayoutOutputsError(_) => {
+                    MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR
+                }
+            },
         }
     }
 
@@ -727,12 +786,24 @@ impl IsSv2Message for Extensions<'_> {
                     CHANNEL_BIT_REQUEST_EXTENSIONS_ERROR
                 }
             },
+            Self::NonCustodialPoolPayouts(m) => match m {
+                NonCustodialPoolPayouts::RequestPayoutOutputs(_) => {
+                    CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS
+                }
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(_) => {
+                    CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS_SUCCESS
+                }
+                NonCustodialPoolPayouts::RequestPayoutOutputsError(_) => {
+                    CHANNEL_BIT_REQUEST_PAYOUT_OUTPUTS_ERROR
+                }
+            },
         }
     }
 
     fn extension_type(&self) -> u16 {
         match self {
             Self::ExtensionsNegotiation(_) => EXTENSION_TYPE_EXTENSIONS_NEGOTIATION,
+            Self::NonCustodialPoolPayouts(_) => EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
         }
     }
 }
@@ -878,6 +949,11 @@ impl<'decoder> From<Extensions<'decoder>> for EncodableField<'decoder> {
                 ExtensionsNegotiation::RequestExtensionsSuccess(a) => a.into(),
                 ExtensionsNegotiation::RequestExtensionsError(a) => a.into(),
             },
+            Extensions::NonCustodialPoolPayouts(ext) => match ext {
+                NonCustodialPoolPayouts::RequestPayoutOutputs(a) => a.into(),
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(a) => a.into(),
+                NonCustodialPoolPayouts::RequestPayoutOutputsError(a) => a.into(),
+            },
         }
     }
 }
@@ -889,6 +965,11 @@ impl GetSize for Extensions<'_> {
                 ExtensionsNegotiation::RequestExtensions(a) => a.get_size(),
                 ExtensionsNegotiation::RequestExtensionsSuccess(a) => a.get_size(),
                 ExtensionsNegotiation::RequestExtensionsError(a) => a.get_size(),
+            },
+            Extensions::NonCustodialPoolPayouts(m) => match m {
+                NonCustodialPoolPayouts::RequestPayoutOutputs(a) => a.get_size(),
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(a) => a.get_size(),
+                NonCustodialPoolPayouts::RequestPayoutOutputsError(a) => a.get_size(),
             },
         }
     }
@@ -1373,6 +1454,34 @@ impl TryFrom<u8> for ExtensionsNegotiationTypes {
     }
 }
 
+/// Extension message types enum for Non-Custodial Pool Payouts (extension_type=0x0003)
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum NonCustodialPoolPayoutsTypes {
+    RequestPayoutOutputs = MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS,
+    RequestPayoutOutputsSuccess = MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+    RequestPayoutOutputsError = MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+}
+
+impl TryFrom<u8> for NonCustodialPoolPayoutsTypes {
+    type Error = ParserError;
+
+    fn try_from(v: u8) -> Result<NonCustodialPoolPayoutsTypes, ParserError> {
+        match v {
+            MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS => {
+                Ok(NonCustodialPoolPayoutsTypes::RequestPayoutOutputs)
+            }
+            MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS => {
+                Ok(NonCustodialPoolPayoutsTypes::RequestPayoutOutputsSuccess)
+            }
+            MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR => {
+                Ok(NonCustodialPoolPayoutsTypes::RequestPayoutOutputsError)
+            }
+            _ => Err(ParserError::UnexpectedMessage(v)),
+        }
+    }
+}
+
 /// TryFrom implementation for parsing Extensions from (extension_type, msg_type, payload)
 ///
 /// Note: The channel_msg bit (bit 15) is automatically stripped from extension_type
@@ -1408,6 +1517,29 @@ impl<'a> TryFrom<(u16, u8, &'a mut [u8])> for Extensions<'a> {
                         let message: RequestExtensionsError = from_bytes(payload)?;
                         Ok(Extensions::ExtensionsNegotiation(
                             ExtensionsNegotiation::RequestExtensionsError(message),
+                        ))
+                    }
+                }
+            }
+            EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS => {
+                let msg_enum: NonCustodialPoolPayoutsTypes = msg_type.try_into()?;
+                match msg_enum {
+                    NonCustodialPoolPayoutsTypes::RequestPayoutOutputs => {
+                        let message: RequestPayoutOutputs = from_bytes(payload)?;
+                        Ok(Extensions::NonCustodialPoolPayouts(
+                            NonCustodialPoolPayouts::RequestPayoutOutputs(message),
+                        ))
+                    }
+                    NonCustodialPoolPayoutsTypes::RequestPayoutOutputsSuccess => {
+                        let message: RequestPayoutOutputsSuccess = from_bytes(payload)?;
+                        Ok(Extensions::NonCustodialPoolPayouts(
+                            NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(message),
+                        ))
+                    }
+                    NonCustodialPoolPayoutsTypes::RequestPayoutOutputsError => {
+                        let message: RequestPayoutOutputsError = from_bytes(payload)?;
+                        Ok(Extensions::NonCustodialPoolPayouts(
+                            NonCustodialPoolPayouts::RequestPayoutOutputsError(message),
                         ))
                     }
                 }
@@ -1662,6 +1794,24 @@ impl<'a> From<RequestExtensionsError<'a>> for Extensions<'a> {
     }
 }
 
+impl<'a> From<RequestPayoutOutputs<'a>> for Extensions<'a> {
+    fn from(v: RequestPayoutOutputs<'a>) -> Self {
+        Extensions::NonCustodialPoolPayouts(NonCustodialPoolPayouts::RequestPayoutOutputs(v))
+    }
+}
+
+impl<'a> From<RequestPayoutOutputsSuccess<'a>> for Extensions<'a> {
+    fn from(v: RequestPayoutOutputsSuccess<'a>) -> Self {
+        Extensions::NonCustodialPoolPayouts(NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(v))
+    }
+}
+
+impl<'a> From<RequestPayoutOutputsError<'a>> for Extensions<'a> {
+    fn from(v: RequestPayoutOutputsError<'a>) -> Self {
+        Extensions::NonCustodialPoolPayouts(NonCustodialPoolPayouts::RequestPayoutOutputsError(v))
+    }
+}
+
 impl<'a> From<OpenStandardMiningChannel<'a>> for Mining<'a> {
     fn from(v: OpenStandardMiningChannel<'a>) -> Self {
         Mining::OpenStandardMiningChannel(v)
@@ -1748,14 +1898,21 @@ impl<'a> TryFrom<AnyMessage<'a>> for MiningDeviceMessages<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::{AnyMessage, Extensions, ExtensionsNegotiation, JobDeclaration, Mining};
+    use crate::{
+        AnyMessage, Extensions, ExtensionsNegotiation, JobDeclaration, Mining,
+        NonCustodialPoolPayouts,
+    };
     use alloc::string::String;
     use alloc::vec;
     use alloc::vec::Vec;
     use binary_sv2::{Seq0255, Seq064K, Str0255, Sv2Option, B0255, B032, B064K, U256};
     use codec_sv2::StandardSv2Frame;
     use core::convert::{TryFrom, TryInto};
-    use extensions_sv2::{RequestExtensions, EXTENSION_TYPE_EXTENSIONS_NEGOTIATION};
+    use extensions_sv2::{
+        RequestExtensions, RequestPayoutOutputs, RequestPayoutOutputsSuccess,
+        EXTENSION_TYPE_EXTENSIONS_NEGOTIATION, EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+        MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+    };
     use job_declaration_sv2::PushSolution;
     use mining_sv2::{
         NewMiningJob, SetCustomMiningJob, SetCustomMiningJobError, SetCustomMiningJobSuccess,
@@ -1792,6 +1949,60 @@ mod test {
             message_type, 0,
             "Message type should be 0 for RequestExtensions"
         );
+    }
+
+    #[test]
+    fn request_payout_outputs_serialization() {
+        let request_payout_outputs = RequestPayoutOutputs {
+            request_id: 0x11223344,
+            mining_job_token: B0255::try_from(vec![5, 6]).unwrap(),
+            available_payout_value: 0x0102030405060708,
+        };
+        let message = AnyMessage::Extensions(Extensions::NonCustodialPoolPayouts(
+            NonCustodialPoolPayouts::RequestPayoutOutputs(request_payout_outputs),
+        ));
+
+        let mut expected = vec![3, 0, 0, 15, 0, 0];
+        expected.extend(0x11223344_u32.to_le_bytes());
+        expected.extend([2, 5, 6]);
+        expected.extend(0x0102030405060708_u64.to_le_bytes());
+
+        message_serialization_check(message, &expected);
+    }
+
+    #[test]
+    fn request_payout_outputs_success_parsing() {
+        let coinbase_tx_outputs = vec![1, 2, 3, 4];
+        let message = RequestPayoutOutputsSuccess {
+            request_id: 7,
+            coinbase_tx_outputs: B064K::try_from(coinbase_tx_outputs.clone()).unwrap(),
+        };
+        let frame =
+            StdFrame::try_from(AnyMessage::Extensions(Extensions::NonCustodialPoolPayouts(
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(message),
+            )))
+            .unwrap();
+        let mut buffer = [0; 0xffff];
+        let encoded_length = frame.encoded_length();
+        frame.serialize(&mut buffer).unwrap();
+
+        let mut payload = extract_payload(&buffer[..encoded_length]).to_vec();
+        let parsed = Extensions::try_from((
+            EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+            MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+            payload.as_mut_slice(),
+        ))
+        .unwrap();
+
+        match parsed {
+            Extensions::NonCustodialPoolPayouts(
+                NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(msg),
+            ) => {
+                assert_eq!(msg.request_id, 7);
+                assert_eq!(msg.coinbase_tx_outputs.to_vec(), coinbase_tx_outputs);
+            }
+            _ => panic!("expected RequestPayoutOutputsSuccess"),
+        }
     }
 
     #[test]

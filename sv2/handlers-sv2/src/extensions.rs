@@ -1,4 +1,7 @@
-use extensions_sv2::{RequestExtensions, RequestExtensionsError, RequestExtensionsSuccess};
+use extensions_sv2::{
+    RequestExtensions, RequestExtensionsError, RequestExtensionsSuccess, RequestPayoutOutputs,
+    RequestPayoutOutputsError, RequestPayoutOutputsSuccess,
+};
 use framing_sv2::header::Header;
 use parsers_sv2::{parse_message_frame_with_tlvs, AnyMessage, Extensions, Tlv};
 
@@ -86,6 +89,21 @@ pub trait HandleExtensionsFromServerSync {
                     ))
                 }
             },
+            Extensions::NonCustodialPoolPayouts(ext) => match ext {
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(msg) => {
+                    self.handle_request_payout_outputs_success(server_id, msg, tlv_fields)
+                }
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsError(msg) => {
+                    self.handle_request_payout_outputs_error(server_id, msg, tlv_fields)
+                }
+                // RequestPayoutOutputs is sent by client, not server
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputs(_) => {
+                    Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                        extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS,
+                    ))
+                }
+            },
         }
     }
 
@@ -102,6 +120,30 @@ pub trait HandleExtensionsFromServerSync {
         msg: RequestExtensionsError,
         tlv_fields: Option<&[Tlv]>,
     ) -> Result<(), Self::Error>;
+
+    fn handle_request_payout_outputs_success(
+        &mut self,
+        _server_id: Option<usize>,
+        _msg: RequestPayoutOutputsSuccess,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        Err(Self::Error::unexpected_message(
+            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+        ))
+    }
+
+    fn handle_request_payout_outputs_error(
+        &mut self,
+        _server_id: Option<usize>,
+        _msg: RequestPayoutOutputsError,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        Err(Self::Error::unexpected_message(
+            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+        ))
+    }
 }
 
 /// Asynchronous handler trait for processing extension messages received from servers.
@@ -199,6 +241,23 @@ pub trait HandleExtensionsFromServerAsync {
                         ))
                     }
                 },
+                Extensions::NonCustodialPoolPayouts(ext) => match ext {
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(msg) => {
+                        self.handle_request_payout_outputs_success(server_id, msg, tlv_fields)
+                            .await
+                    }
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsError(msg) => {
+                        self.handle_request_payout_outputs_error(server_id, msg, tlv_fields)
+                            .await
+                    }
+                    // RequestPayoutOutputs is sent by client, not server
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputs(_) => {
+                        Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS,
+                        ))
+                    }
+                },
             }
         }
     }
@@ -216,6 +275,34 @@ pub trait HandleExtensionsFromServerAsync {
         msg: RequestExtensionsError,
         tlv_fields: Option<&[Tlv]>,
     ) -> Result<(), Self::Error>;
+
+    async fn handle_request_payout_outputs_success(
+        &mut self,
+        _server_id: Option<usize>,
+        _msg: RequestPayoutOutputsSuccess,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        async move {
+            Err(Self::Error::unexpected_message(
+                extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+            ))
+        }
+    }
+
+    async fn handle_request_payout_outputs_error(
+        &mut self,
+        _server_id: Option<usize>,
+        _msg: RequestPayoutOutputsError,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        async move {
+            Err(Self::Error::unexpected_message(
+                extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+            ))
+        }
+    }
 }
 
 /// Synchronous handler trait for processing extension messages received from clients.
@@ -303,6 +390,24 @@ pub trait HandleExtensionsFromClientSync {
                     ))
                 }
             },
+            Extensions::NonCustodialPoolPayouts(ext) => match ext {
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputs(msg) => {
+                    self.handle_request_payout_outputs(client_id, msg, tlv_fields)
+                }
+                // Success/Error are sent by server, not client
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(_) => {
+                    Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                        extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+                    ))
+                }
+                parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsError(_) => {
+                    Err(Self::Error::unexpected_message(
+                        extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                        extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+                    ))
+                }
+            },
         }
     }
 
@@ -312,6 +417,18 @@ pub trait HandleExtensionsFromClientSync {
         msg: RequestExtensions,
         tlv_fields: Option<&[Tlv]>,
     ) -> Result<(), Self::Error>;
+
+    fn handle_request_payout_outputs(
+        &mut self,
+        _client_id: Option<usize>,
+        _msg: RequestPayoutOutputs,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        Err(Self::Error::unexpected_message(
+            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS,
+        ))
+    }
 }
 
 /// Asynchronous handler trait for processing extension messages received from clients.
@@ -411,6 +528,25 @@ pub trait HandleExtensionsFromClientAsync {
                         ))
                     }
                 },
+                Extensions::NonCustodialPoolPayouts(ext) => match ext {
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputs(msg) => {
+                        self.handle_request_payout_outputs(client_id, msg, tlv_fields)
+                            .await
+                    }
+                    // Success/Error are sent by server, not client
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsSuccess(_) => {
+                        Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_SUCCESS,
+                        ))
+                    }
+                    parsers_sv2::NonCustodialPoolPayouts::RequestPayoutOutputsError(_) => {
+                        Err(Self::Error::unexpected_message(
+                            extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                            extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS_ERROR,
+                        ))
+                    }
+                },
             }
         }
     }
@@ -421,4 +557,18 @@ pub trait HandleExtensionsFromClientAsync {
         msg: RequestExtensions,
         tlv_fields: Option<&[Tlv]>,
     ) -> Result<(), Self::Error>;
+
+    async fn handle_request_payout_outputs(
+        &mut self,
+        _client_id: Option<usize>,
+        _msg: RequestPayoutOutputs,
+        _tlv_fields: Option<&[Tlv]>,
+    ) -> Result<(), Self::Error> {
+        async move {
+            Err(Self::Error::unexpected_message(
+                extensions_sv2::EXTENSION_TYPE_NON_CUSTODIAL_POOL_PAYOUTS,
+                extensions_sv2::MESSAGE_TYPE_REQUEST_PAYOUT_OUTPUTS,
+            ))
+        }
+    }
 }
