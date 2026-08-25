@@ -12,7 +12,9 @@ use crate::{
         error::StandardChannelError,
         share_accounting::{ShareAccounting, ShareValidationError, ShareValidationResult},
     },
-    extranonce_manager::{prefix::RetiredExtranoncePrefixes, ExtranoncePrefix},
+    extranonce_manager::{
+        prefix::RetiredExtranoncePrefixes, ExtranoncePrefix, ExtranoncePrefixError,
+    },
     merkle_root::merkle_root_from_path,
     target::{bytes_to_hex, u256_to_block_hash},
     MAX_EXTRANONCE_LEN, MAX_FUTURE_BLOCK_TIME, VERSION_ROLLING_MASK,
@@ -240,22 +242,50 @@ impl StandardChannel {
         Ok(())
     }
 
+    /// Sets the upstream-assigned region of this channel's extranonce prefix.
+    ///
+    /// For an allocator-produced prefix, `local_prefix | local_index`, rollable padding, and its
+    /// allocation are preserved. For a wire-sourced prefix, the entire prefix is
+    /// `upstream_prefix` and is replaced. Jobs received before this call retain their captured
+    /// prefix bytes; new jobs use the updated prefix.
+    ///
+    /// Old prefix bytes share ownership of the same allocator slot while any future, active or
+    /// past job uses them. A later `set_extranonce_prefix` rotation cannot release that slot
+    /// prematurely. Once those jobs are stale or evicted, only the current prefix (if it still
+    /// uses this allocation) keeps the slot reserved. This update consumes no additional slot.
+    pub fn set_upstream_extranonce_prefix(
+        &mut self,
+        upstream_prefix: &[u8],
+    ) -> Result<(), ExtranoncePrefixError> {
+        let snapshot = self
+            .extranonce_prefix
+            .snapshot_for_upstream_update(upstream_prefix);
+        self.extranonce_prefix
+            .set_upstream_prefix(upstream_prefix)?;
+        if let Some(snapshot) = snapshot {
+            self.retired_extranonce_prefixes.retire(
+                snapshot,
+                self.future_jobs
+                    .values()
+                    .chain(self.active_job.iter())
+                    .chain(self.past_jobs.values())
+                    .map(|job| job.extranonce_prefix.as_slice()),
+            );
+        }
+        Ok(())
+    }
+
     /// Returns the bytes representing the first part of the extranonce.
     pub fn get_extranonce_prefix(&self) -> &[u8] {
         self.extranonce_prefix.as_bytes()
     }
 
-    /// Returns the length of the `upstream_prefix` region of this channel's
-    /// extranonce prefix, if known.
+    /// Returns the length of the leading `upstream_prefix` region of this
+    /// channel's extranonce prefix.
     ///
     /// See [`ExtranoncePrefix::upstream_prefix_len`](crate::extranonce_manager::ExtranoncePrefix::upstream_prefix_len)
-    /// for the full semantics. In particular, this is `None` for channels
-    /// opened from a wire-sourced prefix (the common case on a client),
-    /// and `Some(n)` when the application minted the prefix locally from
-    /// an [`ExtranonceAllocator`](crate::extranonce_manager::ExtranonceAllocator) — e.g. a proxy that
-    /// sub-allocates an upstream-assigned extranonce space and hands one
-    /// slot to each downstream channel.
-    pub fn upstream_prefix_len(&self) -> Option<u8> {
+    /// for the full semantics.
+    pub fn upstream_prefix_len(&self) -> u8 {
         self.extranonce_prefix.upstream_prefix_len()
     }
 
@@ -2247,6 +2277,102 @@ mod tests {
         channel.set_extranonce_prefix(prefix_2.into()).unwrap();
 
         (allocator, channel, prefix_1_bytes)
+    }
+
+    #[test]
+    fn test_mixed_prefix_updates_reserve_slot_until_job_eviction() {
+        for future in [false, true] {
+            let mut allocator =
+                ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 32, 2).unwrap();
+            let prefix = allocator.allocate_standard().unwrap();
+            let old_bytes = prefix.as_bytes().to_vec();
+
+            let mut channel = StandardChannel::new(
+                1,
+                "user_identity".to_string(),
+                prefix.into(),
+                Target::from_le_bytes([0xff; 32]),
+                1.0,
+                Some(1),
+            )
+            .unwrap();
+            let job_id = 1;
+            channel
+                .on_new_mining_job(job_template(
+                    job_id,
+                    if future { None } else { Some(1745596970) },
+                ))
+                .unwrap();
+
+            // Change only upstream_prefix, preserving local_prefix and local_index.
+            allocator.set_upstream_prefix(vec![0xcc]).unwrap();
+            channel.set_upstream_extranonce_prefix(&[0xcc]).unwrap();
+            assert_eq!(allocator.allocated_count(), 1);
+            assert_eq!(&channel.get_extranonce_prefix()[1..], &old_bytes[1..]);
+
+            // Repeated updates without new jobs retain only the original job's prefix snapshot.
+            for upstream in [0xdd, 0xaa, 0xcc, 0xcc] {
+                allocator.set_upstream_prefix(vec![upstream]).unwrap();
+                channel.set_upstream_extranonce_prefix(&[upstream]).unwrap();
+                assert_eq!(channel.retired_extranonce_prefixes.len(), 1);
+            }
+            let current_bytes = channel.get_extranonce_prefix().to_vec();
+            assert!(matches!(
+                channel.set_upstream_extranonce_prefix(&[0xee; 32]),
+                Err(crate::extranonce_manager::ExtranoncePrefixError::ExceedsMaxLength)
+            ));
+            assert_eq!(channel.get_extranonce_prefix(), current_bytes);
+            assert_eq!(channel.retired_extranonce_prefixes.len(), 1);
+            assert_eq!(allocator.allocated_count(), 1);
+
+            // A later whole-prefix rotation must not release the slot used by job 1.
+            let replacement = allocator.allocate_standard().unwrap();
+            channel.set_extranonce_prefix(replacement.into()).unwrap();
+            let job = if future {
+                channel.get_future_job(job_id).unwrap()
+            } else {
+                channel.get_active_job().unwrap()
+            };
+            assert_eq!(job.extranonce_prefix, old_bytes);
+            assert_eq!(allocator.allocated_count(), 2);
+            allocator.set_upstream_prefix(vec![0xaa]).unwrap();
+            assert!(matches!(
+                allocator.allocate_standard(),
+                Err(ExtranonceAllocatorError::CapacityExhausted)
+            ));
+
+            // Activating the future job must preserve its old prefix and allocation.
+            if future {
+                channel
+                    .on_set_new_prev_hash(SetNewPrevHashMp {
+                        channel_id: 1,
+                        job_id,
+                        prev_hash: [2; 32].into(),
+                        min_ntime: 1745596970,
+                        nbits: 545259519,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    channel.get_active_job().unwrap().extranonce_prefix,
+                    old_bytes
+                );
+                assert_eq!(allocator.allocated_count(), 2);
+            }
+
+            // The existing one-past-job limit evicts job 1 after jobs 2 and 3 arrive.
+            for job_id in 2..=3 {
+                channel
+                    .on_new_mining_job(job_template(job_id, Some(1745596970)))
+                    .unwrap();
+            }
+            assert!(channel.get_past_job(1).is_none());
+            assert_eq!(allocator.allocated_count(), 1);
+            let reused = allocator.allocate_standard().unwrap();
+            assert_eq!(reused.as_bytes(), old_bytes);
+            drop(reused);
+            drop(channel);
+            assert_eq!(allocator.allocated_count(), 0);
+        }
     }
 
     #[test]
