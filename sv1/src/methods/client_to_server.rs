@@ -106,10 +106,45 @@ fn from_to_json_rpc(auth: Authorize) -> bool {
 // mining.capabilities (DRAFT) (incompatible with mining.configure)
 
 /// _mining.extranonce.subscribe()_
-/// Indicates to the server that the client supports the mining.set_extranonce method.
-/// https://en.bitcoin.it/wiki/BIP_0310
-#[derive(Debug, Clone, Copy)]
-pub struct ExtranonceSubscribe();
+///
+/// Indicates to the server that the client supports the `mining.set_extranonce` method, as
+/// defined by the [NiceHash extranonce subscribe extension][a].
+///
+/// Parameters are ignored for compatibility with existing clients; only the request ID is kept.
+///
+/// [a]: https://github.com/nicehash/Specifications/blob/master/NiceHash_extranonce_subscribe_extension.txt
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtranonceSubscribe {
+    pub id: u64,
+}
+
+impl ExtranonceSubscribe {
+    pub fn respond(self, is_ok: bool) -> Response {
+        Response {
+            id: self.id,
+            result: serde_json::to_value(is_ok).expect("a boolean is always valid JSON"),
+            error: None,
+        }
+    }
+}
+
+impl From<ExtranonceSubscribe> for Message {
+    fn from(subscribe: ExtranonceSubscribe) -> Self {
+        Message::StandardRequest(StandardRequest {
+            id: subscribe.id,
+            method: "mining.extranonce.subscribe".into(),
+            params: Value::Array(Vec::new()),
+        })
+    }
+}
+
+impl TryFrom<StandardRequest> for ExtranonceSubscribe {
+    type Error = ParsingMethodError;
+
+    fn try_from(msg: StandardRequest) -> Result<Self, Self::Error> {
+        Ok(Self { id: msg.id })
+    }
+}
 
 // mining.get_transactions
 

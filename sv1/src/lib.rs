@@ -122,9 +122,9 @@ pub trait IsServer {
                 let (version_rolling, min_diff) = self.handle_configure(client_id, &configure)?;
                 Ok(Some(configure.respond(version_rolling, min_diff)))
             }
-            methods::Client2Server::ExtranonceSubscribe(_) => {
-                self.handle_extranonce_subscribe()?;
-                Ok(None)
+            methods::Client2Server::ExtranonceSubscribe(subscribe) => {
+                self.handle_extranonce_subscribe(client_id)?;
+                Ok(Some(subscribe.respond(true)))
             }
             methods::Client2Server::Submit(submit) => {
                 let has_valid_version_bits = match &submit.version_bits {
@@ -213,8 +213,12 @@ pub trait IsServer {
         request: &client_to_server::Submit,
     ) -> Result<bool, Self::Error>;
 
-    /// Indicates to the server that the client supports the mining.set_extranonce method.
-    fn handle_extranonce_subscribe(&self) -> Result<(), Self::Error>;
+    /// Records that the identified client supports the `mining.set_extranonce`
+    /// notification.
+    ///
+    /// The mutable receiver allows an implementation to retain this capability
+    /// for the lifetime of the client session.
+    fn handle_extranonce_subscribe(&mut self, client_id: Option<usize>) -> Result<(), Self::Error>;
 
     fn is_authorized(&self, client_id: Option<usize>, name: &str) -> Result<bool, Self::Error>;
 
@@ -285,6 +289,26 @@ pub trait IsServer {
     }
 }
 
+fn route_general_response(
+    general: server_to_client::GeneralResponse,
+    authorize_user_name: Option<String>,
+    is_submit: bool,
+    is_extranonce_subscribe: bool,
+) -> Result<methods::Server2ClientResponse, Error> {
+    match (authorize_user_name, is_submit, is_extranonce_subscribe) {
+        (Some(previous_name), false, false) => Ok(methods::Server2ClientResponse::Authorize(
+            general.into_authorize(previous_name),
+        )),
+        (None, false, true) => Ok(methods::Server2ClientResponse::ExtranonceSubscribe(
+            general.into_extranonce_subscribe(),
+        )),
+        (None, false, false) => Ok(methods::Server2ClientResponse::Submit(
+            general.into_submit(),
+        )),
+        _ => Err(Error::UnknownID(general.id)),
+    }
+}
+
 pub trait IsClient {
     /// Error returned by the client implementation.
     ///
@@ -327,22 +351,16 @@ pub trait IsClient {
         server_id: Option<usize>,
         response: methods::Server2ClientResponse,
     ) -> Result<methods::Server2ClientResponse, Self::Error> {
-        match &response {
+        match response {
             methods::Server2ClientResponse::GeneralResponse(general) => {
                 let is_authorize = self.id_is_authorize(server_id, &general.id)?;
                 let is_submit = self.id_is_submit(server_id, &general.id)?;
-                match (is_authorize, is_submit) {
-                    (Some(prev_name), false) => {
-                        let authorize = general.clone().into_authorize(prev_name);
-                        Ok(methods::Server2ClientResponse::Authorize(authorize))
-                    }
-                    (None, false) => Ok(methods::Server2ClientResponse::Submit(
-                        general.clone().into_submit(),
-                    )),
-                    _ => Err(Error::UnknownID(general.id).into()),
-                }
+                let is_extranonce_subscribe =
+                    self.id_is_extranonce_subscribe(server_id, &general.id)?;
+                route_general_response(general, is_authorize, is_submit, is_extranonce_subscribe)
+                    .map_err(Self::Error::from)
             }
-            _ => Ok(response),
+            response => Ok(response),
         }
     }
 
@@ -417,6 +435,7 @@ pub trait IsClient {
                 };
                 Ok(None)
             }
+            methods::Server2ClientResponse::ExtranonceSubscribe(_) => Ok(None),
             methods::Server2ClientResponse::Submit(_) => Ok(None),
             // impossible state
             methods::Server2ClientResponse::GeneralResponse(_) => panic!(),
@@ -440,6 +459,17 @@ pub trait IsClient {
 
     /// Check if the client sent a Submit request with the given id
     fn id_is_submit(&mut self, server_id: Option<usize>, id: &u64) -> Result<bool, Self::Error>;
+
+    /// Returns whether `id` belongs to a `mining.extranonce.subscribe` request.
+    ///
+    /// Clients that do not send this extension can use the default implementation.
+    fn id_is_extranonce_subscribe(
+        &mut self,
+        _server_id: Option<usize>,
+        _id: &u64,
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
 
     fn handle_notify(
         &mut self,
@@ -644,9 +674,30 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    #[test]
+    fn extranonce_subscribe_acknowledgement_has_distinct_response_route() {
+        let response = route_general_response(
+            server_to_client::GeneralResponse {
+                id: 42,
+                result: true,
+            },
+            None,
+            false,
+            true,
+        )
+        .unwrap();
+
+        let methods::Server2ClientResponse::ExtranonceSubscribe(response) = response else {
+            panic!("extranonce subscription acknowledgement was routed as another response");
+        };
+        assert_eq!(response.id, 42);
+        assert!(response.is_ok());
+    }
+
     // A minimal implementation of IsServer trait for testing
     struct TestServer {
         authorized_users: HashSet<String>,
+        extranonce_subscriptions: HashSet<Option<usize>>,
         extranonce1: Extranonce,
         extranonce2_size: usize,
         version_rolling_mask: Option<HexU32Be>,
@@ -657,6 +708,7 @@ mod tests {
         fn new(extranonce1: Extranonce, extranonce2_size: usize) -> Self {
             Self {
                 authorized_users: HashSet::new(),
+                extranonce_subscriptions: HashSet::new(),
                 extranonce1,
                 extranonce2_size,
                 version_rolling_mask: None,
@@ -710,7 +762,8 @@ mod tests {
             Ok(true)
         }
 
-        fn handle_extranonce_subscribe(&self) -> Result<(), Error> {
+        fn handle_extranonce_subscribe(&mut self, client_id: Option<usize>) -> Result<(), Error> {
+            self.extranonce_subscriptions.insert(client_id);
             Ok(())
         }
 
@@ -800,6 +853,53 @@ mod tests {
                 other => panic!("Expected MethodNotFound error, got {:?}", other),
             },
             other => panic!("Expected Error::Method, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn extranonce_subscribe_passes_client_id_to_server() {
+        let extranonce1 = Extranonce::try_from(hex_decode("08000002").unwrap()).unwrap();
+        let mut server = TestServer::new(extranonce1, 4);
+        let request = json_rpc::Message::StandardRequest(json_rpc::StandardRequest {
+            id: 42,
+            method: "mining.extranonce.subscribe".to_string(),
+            params: serde_json::json!([]),
+        });
+
+        let response = server.handle_message(Some(7), request).unwrap();
+
+        let response = response.expect("extranonce subscribe should be acknowledged");
+        assert_eq!(response.id, 42);
+        assert_eq!(response.result, serde_json::json!(true));
+        assert!(response.error.is_none());
+        assert_eq!(server.extranonce_subscriptions, HashSet::from([Some(7)]));
+    }
+
+    #[test]
+    fn extranonce_subscribe_ignores_params_and_acknowledges_request_id() {
+        for params in [
+            serde_json::Value::Null,
+            serde_json::json!(["ignored"]),
+            serde_json::json!({"ignored": true}),
+        ] {
+            let extranonce1 = vec![0; 4].try_into().unwrap();
+            let mut server = TestServer::new(extranonce1, 4);
+            let request = serde_json::from_value(serde_json::json!({
+                "id": 42,
+                "method": "mining.extranonce.subscribe",
+                "params": params,
+            }))
+            .unwrap();
+
+            let response = server
+                .handle_message(Some(7), request)
+                .unwrap()
+                .expect("extranonce subscribe should be acknowledged");
+
+            assert_eq!(response.id, 42);
+            assert_eq!(response.result, serde_json::json!(true));
+            assert!(response.error.is_none());
+            assert_eq!(server.extranonce_subscriptions, HashSet::from([Some(7)]));
         }
     }
 

@@ -241,7 +241,7 @@ impl IsServer for Server {
     }
 
     /// Indicates to the server that the client supports the mining.set_extranonce method.
-    fn handle_extranonce_subscribe(&self) -> Result<(), Error> {
+    fn handle_extranonce_subscribe(&mut self, _client_id: Option<usize>) -> Result<(), Error> {
         Ok(())
     }
 
