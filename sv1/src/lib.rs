@@ -138,16 +138,19 @@ pub trait IsServer {
                     None => self.version_rolling_mask(client_id)?.is_none(),
                 };
 
-                let is_valid_submission = self.is_authorized(client_id, &submit.user_name)?
-                    && self.extranonce2_size(client_id)? == submit.extra_nonce2.len()
-                    && has_valid_version_bits;
-
-                if is_valid_submission {
-                    let accepted = self.handle_submit(client_id, &submit)?;
-                    Ok(Some(submit.respond(accepted)))
-                } else {
-                    Err(Error::InvalidSubmission.into())
+                if !self.is_authorized(client_id, &submit.user_name)? {
+                    return Err(Error::InvalidSubmission.into());
                 }
+
+                let outcome = if self.extranonce2_size(client_id)? != submit.extra_nonce2.len()
+                    || !has_valid_version_bits
+                {
+                    client_to_server::SubmitOutcome::Rejected(client_to_server::SubmitError::Other)
+                } else {
+                    self.handle_submit(client_id, &submit)?
+                };
+
+                Ok(Some(submit.respond(outcome)))
             }
             methods::Client2Server::Subscribe(subscribe) => {
                 let subscriptions = self.handle_subscribe(client_id, &subscribe)?;
@@ -211,7 +214,7 @@ pub trait IsServer {
         &self,
         client_id: Option<usize>,
         request: &client_to_server::Submit,
-    ) -> Result<bool, Self::Error>;
+    ) -> Result<client_to_server::SubmitOutcome, Self::Error>;
 
     /// Records that the identified client supports the `mining.set_extranonce`
     /// notification.
@@ -758,8 +761,8 @@ mod tests {
             &self,
             _client_id: Option<usize>,
             _request: &client_to_server::Submit,
-        ) -> Result<bool, Error> {
-            Ok(true)
+        ) -> Result<client_to_server::SubmitOutcome, Error> {
+            Ok(client_to_server::SubmitOutcome::Accepted)
         }
 
         fn handle_extranonce_subscribe(&mut self, client_id: Option<usize>) -> Result<(), Error> {
@@ -901,6 +904,33 @@ mod tests {
             assert!(response.error.is_none());
             assert_eq!(server.extranonce_subscriptions, HashSet::from([Some(7)]));
         }
+    }
+
+    #[test]
+    fn invalid_submit_fields_return_code_20() {
+        let extranonce1 = Extranonce::try_from(hex_decode("08000002").unwrap()).unwrap();
+        let mut server = TestServer::new(extranonce1, 4);
+        server.authorized_users.insert("worker".to_string());
+        let request = client_to_server::Submit {
+            user_name: "worker".to_string(),
+            job_id: "job".to_string(),
+            extra_nonce2: vec![0; 3].try_into().unwrap(),
+            time: HexU32Be(0),
+            nonce: HexU32Be(0),
+            version_bits: None,
+            id: 42,
+        };
+
+        let response = server
+            .handle_message(None, request.into())
+            .unwrap()
+            .expect("mining.submit must receive a response");
+
+        assert_eq!(response.result, serde_json::Value::Null);
+        let error = response
+            .error
+            .expect("invalid submit must include an error");
+        assert_eq!(error.code, 20);
     }
 
     #[test]

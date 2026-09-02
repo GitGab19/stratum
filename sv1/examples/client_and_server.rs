@@ -236,8 +236,8 @@ impl IsServer for Server {
         &self,
         _client_id: Option<usize>,
         _request: &client_to_server::Submit,
-    ) -> Result<bool, Error> {
-        Ok(true)
+    ) -> Result<client_to_server::SubmitOutcome, Error> {
+        Ok(client_to_server::SubmitOutcome::Accepted)
     }
 
     /// Indicates to the server that the client supports the mining.set_extranonce method.

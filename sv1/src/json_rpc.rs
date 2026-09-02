@@ -1,5 +1,5 @@
 //! https://www.jsonrpc.org/specification#response_object
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, fmt::Display};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -92,11 +92,51 @@ impl fmt::Display for Response {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct JsonRpcError {
     pub code: i32, // json do not specify precision which one should be used?
     pub message: String,
     pub data: Option<serde_json::Value>,
+}
+
+impl Serialize for JsonRpcError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (&self.code, &self.message, &self.data).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for JsonRpcError {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum JsonRpcErrorWire {
+            Legacy((i32, String, Option<serde_json::Value>)),
+            Object {
+                code: i32,
+                message: String,
+                data: Option<serde_json::Value>,
+            },
+        }
+
+        match JsonRpcErrorWire::deserialize(deserializer)? {
+            JsonRpcErrorWire::Legacy((code, message, data))
+            | JsonRpcErrorWire::Object {
+                code,
+                message,
+                data,
+            } => Ok(Self {
+                code,
+                message,
+                data,
+            }),
+        }
+    }
 }
 
 impl From<Response> for Message {
@@ -118,5 +158,52 @@ impl From<StandardRequest> for Message {
 impl From<Notification> for Message {
     fn from(n: Notification) -> Self {
         Message::Notification(n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_legacy_sv1_error_array() {
+        let response: Response = serde_json::from_value(serde_json::json!({
+            "id": 42,
+            "result": null,
+            "error": [22, "Duplicate share", null],
+        }))
+        .unwrap();
+
+        assert_eq!(
+            response.error,
+            Some(JsonRpcError {
+                code: 22,
+                message: "Duplicate share".to_string(),
+                data: None,
+            })
+        );
+    }
+
+    #[test]
+    fn deserializes_json_rpc_error_object_for_compatibility() {
+        let response: Response = serde_json::from_value(serde_json::json!({
+            "id": 42,
+            "result": null,
+            "error": {
+                "code": 22,
+                "message": "Duplicate share",
+                "data": null,
+            },
+        }))
+        .unwrap();
+
+        assert_eq!(
+            response.error,
+            Some(JsonRpcError {
+                code: 22,
+                message: "Duplicate share".to_string(),
+                data: None,
+            })
+        );
     }
 }
