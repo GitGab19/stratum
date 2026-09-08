@@ -12,9 +12,7 @@ use crate::{
         error::ExtendedChannelError,
         share_accounting::{ShareAccounting, ShareValidationError, ShareValidationResult},
     },
-    extranonce_manager::{
-        prefix::RetiredExtranoncePrefixes, ExtranoncePrefix, ExtranoncePrefixError,
-    },
+    extranonce_manager::{prefix::RetiredExtranoncePrefixes, ExtranoncePrefix},
     merkle_root::merkle_root_from_path,
     target::{bytes_to_hex, u256_to_block_hash},
     MAX_EXTRANONCE_LEN, MAX_FUTURE_BLOCK_TIME, VERSION_ROLLING_MASK,
@@ -232,10 +230,8 @@ impl ExtendedChannel {
         &mut self,
         new_extranonce_prefix: ExtranoncePrefix,
     ) -> Result<(), ExtendedChannelError> {
-        let full_extranonce_size = new_extranonce_prefix
-            .len()
-            .checked_add(self.rollable_extranonce_size as usize)
-            .ok_or(ExtendedChannelError::NewExtranoncePrefixTooLarge)?;
+        let full_extranonce_size =
+            new_extranonce_prefix.len() + self.rollable_extranonce_size as usize;
         if full_extranonce_size > MAX_EXTRANONCE_LEN as usize {
             return Err(ExtendedChannelError::NewExtranoncePrefixTooLarge);
         }
@@ -269,26 +265,20 @@ impl ExtendedChannel {
     pub fn set_upstream_extranonce_prefix(
         &mut self,
         upstream_prefix: &[u8],
-    ) -> Result<(), ExtranoncePrefixError> {
-        let preserved_prefix_len = self
-            .extranonce_prefix
-            .len()
-            .checked_sub(self.extranonce_prefix.upstream_prefix_len() as usize)
-            .ok_or(ExtranoncePrefixError::ExceedsMaxLength)?;
-        let full_extranonce_size = upstream_prefix
-            .len()
-            .checked_add(preserved_prefix_len)
-            .and_then(|len| len.checked_add(self.rollable_extranonce_size as usize))
-            .ok_or(ExtranoncePrefixError::ExceedsMaxLength)?;
+    ) -> Result<(), ExtendedChannelError> {
+        let full_extranonce_size = upstream_prefix.len()
+            + self.extranonce_prefix.preserved_len()
+            + self.rollable_extranonce_size as usize;
         if full_extranonce_size > MAX_EXTRANONCE_LEN as usize {
-            return Err(ExtranoncePrefixError::ExceedsMaxLength);
+            return Err(ExtendedChannelError::NewExtranoncePrefixTooLarge);
         }
 
         let snapshot = self
             .extranonce_prefix
             .snapshot_for_upstream_update(upstream_prefix);
         self.extranonce_prefix
-            .set_upstream_prefix(upstream_prefix)?;
+            .set_upstream_prefix(upstream_prefix)
+            .map_err(|_| ExtendedChannelError::NewExtranoncePrefixTooLarge)?;
         if let Some(snapshot) = snapshot {
             self.retired_extranonce_prefixes.retire(
                 snapshot,
@@ -1031,8 +1021,7 @@ mod tests {
             MAX_FUTURE_JOBS, MAX_PAST_JOBS,
         },
         extranonce_manager::{
-            ExtranonceAllocator, ExtranonceAllocatorError, ExtranoncePrefix, ExtranoncePrefixError,
-            MAX_EXTRANONCE_LEN,
+            ExtranonceAllocator, ExtranonceAllocatorError, ExtranoncePrefix, MAX_EXTRANONCE_LEN,
         },
     };
     use binary_sv2::Sv2OptionOwned as Sv2Option;
@@ -1173,7 +1162,7 @@ mod tests {
         let result = channel.set_upstream_extranonce_prefix(&[0xdd; 29]);
         assert!(matches!(
             result,
-            Err(ExtranoncePrefixError::ExceedsMaxLength)
+            Err(ExtendedChannelError::NewExtranoncePrefixTooLarge)
         ));
         assert_eq!(channel.get_extranonce_prefix(), &largest_valid_prefix);
         assert_eq!(channel.upstream_prefix_len(), upstream_prefix_len);
@@ -3356,7 +3345,7 @@ mod tests {
             let current_bytes = channel.get_extranonce_prefix().to_vec();
             assert!(matches!(
                 channel.set_upstream_extranonce_prefix(&[0xee; 2]),
-                Err(crate::extranonce_manager::ExtranoncePrefixError::ExceedsMaxLength)
+                Err(ExtendedChannelError::NewExtranoncePrefixTooLarge)
             ));
             assert_eq!(channel.get_extranonce_prefix(), current_bytes);
             assert_eq!(channel.retired_extranonce_prefixes.len(), 1);

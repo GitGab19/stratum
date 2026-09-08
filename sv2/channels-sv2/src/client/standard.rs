@@ -12,9 +12,7 @@ use crate::{
         error::StandardChannelError,
         share_accounting::{ShareAccounting, ShareValidationError, ShareValidationResult},
     },
-    extranonce_manager::{
-        prefix::RetiredExtranoncePrefixes, ExtranoncePrefix, ExtranoncePrefixError,
-    },
+    extranonce_manager::{prefix::RetiredExtranoncePrefixes, ExtranoncePrefix},
     merkle_root::merkle_root_from_path,
     target::{bytes_to_hex, u256_to_block_hash},
     MAX_EXTRANONCE_LEN, MAX_FUTURE_BLOCK_TIME, VERSION_ROLLING_MASK,
@@ -247,7 +245,9 @@ impl StandardChannel {
     /// For an allocator-produced prefix, `local_prefix | local_index`, rollable padding, and its
     /// allocation are preserved. For a wire-sourced prefix, the entire prefix is
     /// `upstream_prefix` and is replaced. Jobs received before this call retain their captured
-    /// prefix bytes; new jobs use the updated prefix.
+    /// prefix bytes; new jobs use the updated prefix. Returns
+    /// [`StandardChannelError::NewExtranoncePrefixTooLarge`] without changing the channel if the
+    /// resulting prefix would exceed [`MAX_EXTRANONCE_LEN`].
     ///
     /// Old prefix bytes share ownership of the same allocator slot while any future, active or
     /// past job uses them. A later `set_extranonce_prefix` rotation cannot release that slot
@@ -256,12 +256,13 @@ impl StandardChannel {
     pub fn set_upstream_extranonce_prefix(
         &mut self,
         upstream_prefix: &[u8],
-    ) -> Result<(), ExtranoncePrefixError> {
+    ) -> Result<(), StandardChannelError> {
         let snapshot = self
             .extranonce_prefix
             .snapshot_for_upstream_update(upstream_prefix);
         self.extranonce_prefix
-            .set_upstream_prefix(upstream_prefix)?;
+            .set_upstream_prefix(upstream_prefix)
+            .map_err(|_| StandardChannelError::NewExtranoncePrefixTooLarge)?;
         if let Some(snapshot) = snapshot {
             self.retired_extranonce_prefixes.retire(
                 snapshot,
@@ -804,6 +805,67 @@ mod tests {
         SetNewPrevHashOwned as SetNewPrevHashMp, SubmitSharesStandardOwned,
         ERROR_CODE_SUBMIT_SHARES_INVALID_NON_ROLLABLE_VERSION_BIT,
     };
+
+    #[test]
+    fn set_upstream_extranonce_prefix_preserves_allocation_transactionally() {
+        // local_prefix(1) + local_index(1) + padding(3) leave 27 bytes for upstream_prefix.
+        let mut allocator =
+            ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 6, 256).unwrap();
+        let allocated_prefix = allocator.allocate_standard().unwrap();
+        let preserved_bytes = allocated_prefix.as_bytes()[1..].to_vec();
+        assert_eq!(preserved_bytes, vec![0xbb, 0, 0, 0, 0]);
+        let mut channel = StandardChannel::new(
+            1,
+            "user_identity".to_string(),
+            allocated_prefix.into(),
+            Target::from_le_bytes([0xff; 32]),
+            1.0,
+            None,
+        )
+        .unwrap();
+
+        channel.set_upstream_extranonce_prefix(&[0xcc; 27]).unwrap();
+        assert_eq!(channel.upstream_prefix_len(), 27);
+        assert_eq!(&channel.get_extranonce_prefix()[..27], &[0xcc; 27]);
+        assert_eq!(&channel.get_extranonce_prefix()[27..], preserved_bytes);
+        assert_eq!(allocator.allocated_count(), 1);
+        let largest_valid_prefix = channel.get_extranonce_prefix().to_vec();
+
+        assert!(matches!(
+            channel.set_upstream_extranonce_prefix(&[0xdd; 28]),
+            Err(StandardChannelError::NewExtranoncePrefixTooLarge)
+        ));
+        assert_eq!(channel.get_extranonce_prefix(), largest_valid_prefix);
+        assert_eq!(channel.upstream_prefix_len(), 27);
+        assert_eq!(allocator.allocated_count(), 1);
+
+        drop(channel);
+        assert_eq!(allocator.allocated_count(), 0);
+    }
+
+    #[test]
+    fn set_upstream_extranonce_prefix_replaces_wire_prefix_transactionally() {
+        let mut channel = StandardChannel::new(
+            1,
+            "user_identity".to_string(),
+            ExtranoncePrefix::from_wire(vec![0xaa, 0xbb]).unwrap(),
+            Target::from_le_bytes([0xff; 32]),
+            1.0,
+            None,
+        )
+        .unwrap();
+
+        channel.set_upstream_extranonce_prefix(&[0xcc; 32]).unwrap();
+        assert_eq!(channel.get_extranonce_prefix(), &[0xcc; 32]);
+        assert_eq!(channel.upstream_prefix_len(), 32);
+
+        assert!(matches!(
+            channel.set_upstream_extranonce_prefix(&[0xdd; 33]),
+            Err(StandardChannelError::NewExtranoncePrefixTooLarge)
+        ));
+        assert_eq!(channel.get_extranonce_prefix(), &[0xcc; 32]);
+        assert_eq!(channel.upstream_prefix_len(), 32);
+    }
 
     #[test]
     fn test_future_job_activation_flow() {
@@ -2318,8 +2380,8 @@ mod tests {
             }
             let current_bytes = channel.get_extranonce_prefix().to_vec();
             assert!(matches!(
-                channel.set_upstream_extranonce_prefix(&[0xee; 32]),
-                Err(crate::extranonce_manager::ExtranoncePrefixError::ExceedsMaxLength)
+                channel.set_upstream_extranonce_prefix(&[0xee; 2]),
+                Err(StandardChannelError::NewExtranoncePrefixTooLarge)
             ));
             assert_eq!(channel.get_extranonce_prefix(), current_bytes);
             assert_eq!(channel.retired_extranonce_prefixes.len(), 1);

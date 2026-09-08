@@ -232,12 +232,10 @@ impl ExtranonceAllocator {
         &mut self,
         upstream_prefix_bytes: Vec<u8>,
     ) -> Result<(), ExtranonceAllocatorError> {
-        let total_extranonce_len = upstream_prefix_bytes
-            .len()
-            .checked_add(self.local_prefix_len() as usize)
-            .and_then(|len| len.checked_add(self.local_index_len() as usize))
-            .and_then(|len| len.checked_add(self.rollable_extranonce_size() as usize))
-            .ok_or(ExtranonceAllocatorError::ExceedsMaxLength)?;
+        let total_extranonce_len = upstream_prefix_bytes.len()
+            + self.local_prefix_len() as usize
+            + self.local_index_len() as usize
+            + self.rollable_extranonce_size() as usize;
 
         if total_extranonce_len > MAX_EXTRANONCE_LEN as usize {
             return Err(ExtranonceAllocatorError::ExceedsMaxLength);
@@ -456,6 +454,7 @@ impl core::fmt::Display for ExtranonceAllocatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extranonce_manager::ExtranoncePrefix;
     use std::collections::HashSet;
 
     #[test]
@@ -733,8 +732,8 @@ mod tests {
         // upstream(1) + local_prefix(1) + local_index(1) + rollable(3) = 6
         let mut alloc =
             ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 6, 256).unwrap();
-        let mut first = alloc.allocate_extended(3).unwrap();
-        let mut second = alloc.allocate_extended(3).unwrap();
+        let mut first: ExtranoncePrefix = alloc.allocate_extended(3).unwrap().into();
+        let mut second: ExtranoncePrefix = alloc.allocate_extended(3).unwrap().into();
 
         alloc.set_upstream_prefix(vec![0xcc, 0xdd]).unwrap();
         first.set_upstream_prefix(alloc.upstream_prefix()).unwrap();

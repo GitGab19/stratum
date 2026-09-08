@@ -348,10 +348,7 @@ impl ExtendedChannel {
         &mut self,
         extranonce_prefix: AllocatedExtranoncePrefix,
     ) -> Result<(), ExtendedChannelError> {
-        let full_extranonce_size = extranonce_prefix
-            .len()
-            .checked_add(self.rollable_extranonce_size as usize)
-            .ok_or(ExtendedChannelError::ExtranoncePrefixTooLarge)?;
+        let full_extranonce_size = extranonce_prefix.len() + self.rollable_extranonce_size as usize;
         if full_extranonce_size > MAX_EXTRANONCE_LEN as usize {
             return Err(ExtendedChannelError::ExtranoncePrefixTooLarge);
         }
@@ -397,10 +394,9 @@ impl ExtendedChannel {
         &mut self,
         upstream_prefix: &[u8],
     ) -> Result<(), ExtendedChannelError> {
-        let preserved_prefix_len =
-            self.extranonce_prefix.len() - self.extranonce_prefix.upstream_prefix_len() as usize;
-        let full_extranonce_size =
-            upstream_prefix.len() + preserved_prefix_len + self.rollable_extranonce_size as usize;
+        let full_extranonce_size = upstream_prefix.len()
+            + self.extranonce_prefix.preserved_len()
+            + self.rollable_extranonce_size as usize;
         if full_extranonce_size > MAX_EXTRANONCE_LEN as usize {
             return Err(ExtendedChannelError::ExtranoncePrefixTooLarge);
         }

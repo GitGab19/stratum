@@ -187,6 +187,13 @@ impl ExtranoncePrefix {
         self.upstream_prefix_len
     }
 
+    /// Bytes retained when replacing the upstream region: `local_prefix | local_index`, plus
+    /// any standard-channel rollable padding. Wire-sourced prefixes have no preserved region.
+    #[inline]
+    pub(crate) fn preserved_len(&self) -> usize {
+        self.len() - self.upstream_prefix_len as usize
+    }
+
     /// Replaces the upstream-assigned region of this prefix.
     ///
     /// Prefixes created by an [`ExtranonceAllocator`](super::allocator::ExtranonceAllocator)
@@ -211,10 +218,7 @@ impl ExtranoncePrefix {
         upstream_prefix: &[u8],
     ) -> Result<(), ExtranoncePrefixError> {
         let preserved_bytes = &self.prefix[self.upstream_prefix_len as usize..];
-        let updated_len = upstream_prefix
-            .len()
-            .checked_add(preserved_bytes.len())
-            .ok_or(ExtranoncePrefixError::ExceedsMaxLength)?;
+        let updated_len = upstream_prefix.len() + preserved_bytes.len();
 
         if updated_len > MAX_EXTRANONCE_LEN as usize {
             return Err(ExtranoncePrefixError::ExceedsMaxLength);
@@ -336,16 +340,6 @@ impl AllocatedExtranoncePrefix {
     #[inline]
     pub fn upstream_prefix_len(&self) -> u8 {
         self.0.upstream_prefix_len()
-    }
-
-    /// Replaces `upstream_prefix` while preserving `local_prefix | local_index`,
-    /// any standard-channel rollable padding, and the allocator ownership record.
-    #[inline]
-    pub fn set_upstream_prefix(
-        &mut self,
-        upstream_prefix: &[u8],
-    ) -> Result<(), ExtranoncePrefixError> {
-        self.0.set_upstream_prefix(upstream_prefix)
     }
 }
 
@@ -553,6 +547,19 @@ mod tests {
         let mut retired = RetiredExtranoncePrefixes::default();
         retired.retire(snapshot, core::iter::once(current.as_bytes()));
         assert!(retired.is_empty());
+    }
+
+    #[test]
+    fn preserved_len_includes_local_index_and_standard_padding() {
+        let mut allocator =
+            ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 6, 256).unwrap();
+        let extended: ExtranoncePrefix = allocator.allocate_extended(3).unwrap().into();
+        let standard: ExtranoncePrefix = allocator.allocate_standard().unwrap().into();
+        let wire = ExtranoncePrefix::from_wire(vec![0xaa, 0xbb]).unwrap();
+
+        assert_eq!(extended.preserved_len(), 2);
+        assert_eq!(standard.preserved_len(), 5);
+        assert_eq!(wire.preserved_len(), 0);
     }
 
     #[test]

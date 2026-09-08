@@ -351,9 +351,7 @@ impl StandardChannel {
         &mut self,
         upstream_prefix: &[u8],
     ) -> Result<(), StandardChannelError> {
-        let preserved_prefix_len =
-            self.extranonce_prefix.len() - self.extranonce_prefix.upstream_prefix_len() as usize;
-        let updated_prefix_len = upstream_prefix.len() + preserved_prefix_len;
+        let updated_prefix_len = upstream_prefix.len() + self.extranonce_prefix.preserved_len();
         if updated_prefix_len > MAX_EXTRANONCE_LEN as usize {
             return Err(StandardChannelError::ExtranoncePrefixTooLarge);
         }
