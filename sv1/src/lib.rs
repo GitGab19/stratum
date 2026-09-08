@@ -102,6 +102,22 @@ pub trait IsServer {
     {
         let request = msg.try_into().map_err(Error::from)?;
 
+        self.handle_parsed_request(client_id, request)
+    }
+
+    /// Handles a request already decoded by [`methods::Client2Server::try_from`].
+    ///
+    /// Servers may use the typed request to check session ordering before allocating resources,
+    /// then dispatch it here without parsing it again. This is the same dispatch path used by
+    /// [`Self::handle_message`]; decoding alone does not execute handlers or authorize a client.
+    fn handle_parsed_request(
+        &mut self,
+        client_id: Option<usize>,
+        request: methods::Client2Server,
+    ) -> Result<Option<json_rpc::Response>, Self::Error>
+    where
+        Self: std::marker::Sized,
+    {
         match request {
             // TODO: Handle suggested difficulty
             methods::Client2Server::SuggestDifficulty() => Ok(None),
@@ -903,6 +919,36 @@ mod tests {
             assert_eq!(response.result, serde_json::json!(true));
             assert!(response.error.is_none());
             assert_eq!(server.extranonce_subscriptions, HashSet::from([Some(7)]));
+        }
+    }
+
+    #[test]
+    fn parsed_requests_use_the_same_dispatch_as_wire_messages() {
+        let prefix: Extranonce = vec![1, 2, 3, 4].try_into().unwrap();
+        let mut wire_server = TestServer::new(prefix.clone(), 4);
+        let mut typed_server = TestServer::new(prefix, 4);
+        for wire in [
+            r#"{"id":1,"method":"mining.configure","params":[[],{}]}"#,
+            r#"{"id":2,"method":"mining.subscribe","params":[]}"#,
+            r#"{"id":3,"method":"mining.authorize","params":["worker",""]}"#,
+            r#"{"id":4,"method":"mining.extranonce.subscribe","params":[]}"#,
+            r#"{"id":5,"method":"mining.submit","params":["worker","1","00000000","00000001","00000000"]}"#,
+        ] {
+            let message: Message = serde_json::from_str(wire).unwrap();
+            let request = methods::Client2Server::try_from(message.clone()).unwrap();
+            let wire_response = wire_server.handle_message(Some(7), message).unwrap();
+            let typed_response = typed_server
+                .handle_parsed_request(Some(7), request)
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(wire_response).unwrap(),
+                serde_json::to_value(typed_response).unwrap()
+            );
+            assert_eq!(wire_server.authorized_users, typed_server.authorized_users);
+            assert_eq!(
+                wire_server.extranonce_subscriptions,
+                typed_server.extranonce_subscriptions
+            );
         }
     }
 
