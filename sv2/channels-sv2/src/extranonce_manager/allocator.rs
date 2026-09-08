@@ -214,9 +214,17 @@ impl ExtranonceAllocator {
     /// or shrinks with the upstream prefix.
     ///
     /// Prefixes already returned by this allocator are not modified
-    /// automatically. Call
-    /// [`ExtranoncePrefix::set_upstream_prefix`](crate::extranonce_manager::ExtranoncePrefix::set_upstream_prefix)
-    /// on each live prefix so its bytes remain consistent with the allocator.
+    /// automatically. Update each live channel through its `set_upstream_extranonce_prefix`
+    /// method so its bytes remain consistent with the allocator and its live jobs keep their
+    /// allocation reserved. For standalone prefixes not owned by a channel, use
+    /// [`ExtranoncePrefix::set_upstream_prefix`](crate::extranonce_manager::ExtranoncePrefix::set_upstream_prefix).
+    ///
+    /// Applications must coordinate the complete transition. Validate the proposed layout for the
+    /// allocator and every live channel before mutating any state; then update the allocator and
+    /// channels, update group-channel size where applicable, and finally send
+    /// `SetExtranoncePrefix` downstream. If the transition cannot be completed, retain the old
+    /// layout or enter the application's fallback path. Jobs created before a successful update
+    /// continue using the prefix bytes captured when they were created.
     ///
     /// The allocator is left unchanged if the resulting full extranonce would
     /// exceed [`MAX_EXTRANONCE_LEN`].

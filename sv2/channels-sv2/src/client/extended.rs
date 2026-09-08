@@ -114,7 +114,9 @@ impl ExtendedChannel {
     /// `max_past_jobs` caps the past jobs retained under the current chain tip. `None` and
     /// `Some(0)` both select [`MAX_PAST_JOBS`].
     ///
-    /// Returns [`ExtendedChannelError::InvalidTarget`] if `target` is zero.
+    /// Returns [`ExtendedChannelError::InvalidTarget`] if `target` is zero, or
+    /// [`ExtendedChannelError::NewExtranoncePrefixTooLarge`] if the prefix and rollable extranonce
+    /// together exceed [`MAX_EXTRANONCE_LEN`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         channel_id: u32,
@@ -128,6 +130,11 @@ impl ExtendedChannel {
     ) -> Result<Self, ExtendedChannelError> {
         if target == Target::ZERO {
             return Err(ExtendedChannelError::InvalidTarget);
+        }
+
+        if extranonce_prefix.len() + rollable_extranonce_size as usize > MAX_EXTRANONCE_LEN as usize
+        {
+            return Err(ExtendedChannelError::NewExtranoncePrefixTooLarge);
         }
 
         // fall back to the default when the caller has no opinion: `None`, or `Some(0)`, which
@@ -1086,6 +1093,25 @@ mod tests {
             &new_prefix
         );
         assert_eq!(allocator.allocated_count(), 1);
+    }
+
+    #[test]
+    fn new_enforces_full_extranonce_size() {
+        let result = ExtendedChannel::new(
+            1,
+            "user_identity".to_string(),
+            ExtranoncePrefix::from_wire(vec![0xaa; MAX_EXTRANONCE_LEN as usize]).unwrap(),
+            Target::from_le_bytes([0xff; 32]),
+            1.0,
+            true,
+            1,
+            None,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ExtendedChannelError::NewExtranoncePrefixTooLarge)
+        ));
     }
 
     #[test]

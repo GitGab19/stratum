@@ -373,6 +373,56 @@ impl ExtendedChannel {
         Ok(())
     }
 
+    /// Replaces the upstream-assigned region of this channel's extranonce prefix.
+    ///
+    /// The locally allocated suffix and its bitmap lease remain attached to the channel, so this
+    /// does not consume a second allocation while jobs created with the previous upstream prefix
+    /// remain valid. Existing jobs retain their captured prefix bytes; new jobs use the updated
+    /// prefix.
+    ///
+    /// The channel is left unchanged if the resulting full extranonce exceeds
+    /// [`MAX_EXTRANONCE_LEN`] or the assembled coinbase `scriptSig` budget.
+    ///
+    /// Old prefix bytes share ownership of the same allocator slot while any future, active or
+    /// past job uses them. A later `set_extranonce_prefix` rotation cannot release that slot
+    /// prematurely. Once those jobs are stale or evicted, only the current prefix (if it still
+    /// uses this allocation) keeps the slot reserved. This update consumes no additional slot.
+    ///
+    /// If this channel belongs to a [`GroupChannel`](super::group::GroupChannel) and the update
+    /// changes its full extranonce size, the application must update the group with
+    /// [`GroupChannel::set_full_extranonce_size`](super::group::GroupChannel::set_full_extranonce_size)
+    /// and register the compatible channel IDs again. Changing the group size clears its current
+    /// channel membership.
+    pub fn set_upstream_extranonce_prefix(
+        &mut self,
+        upstream_prefix: &[u8],
+    ) -> Result<(), ExtendedChannelError> {
+        let preserved_prefix_len =
+            self.extranonce_prefix.len() - self.extranonce_prefix.upstream_prefix_len() as usize;
+        let full_extranonce_size =
+            upstream_prefix.len() + preserved_prefix_len + self.rollable_extranonce_size as usize;
+        if full_extranonce_size > MAX_EXTRANONCE_LEN as usize {
+            return Err(ExtendedChannelError::ExtranoncePrefixTooLarge);
+        }
+        if !self
+            .job_factory
+            .fits_script_sig_budget(full_extranonce_size)
+        {
+            return Err(ExtendedChannelError::ScriptSigSizeTooLarge);
+        }
+
+        let snapshot = self
+            .extranonce_prefix
+            .snapshot_for_upstream_update(upstream_prefix);
+        self.extranonce_prefix
+            .set_upstream_prefix(upstream_prefix)
+            .map_err(|_| ExtendedChannelError::ExtranoncePrefixTooLarge)?;
+        if let Some(snapshot) = snapshot {
+            self.job_store.retire_extranonce_prefix(snapshot);
+        }
+        Ok(())
+    }
+
     /// Returns the number of bytes available for the rollable portion of the extranonce.
     pub fn get_rollable_extranonce_size(&self) -> u16 {
         self.rollable_extranonce_size
@@ -2086,8 +2136,16 @@ mod tests {
         // scriptSig one byte past the budget must be rejected
         let oversized_prefix = vec![0xcd; largest_valid_prefix_len + 1];
         assert!(oversized_prefix.len() <= MAX_EXTRANONCE_LEN as usize);
-        let res = channel
-            .set_extranonce_prefix(AllocatedExtranoncePrefix::for_test(oversized_prefix).unwrap());
+        let res = channel.set_extranonce_prefix(
+            AllocatedExtranoncePrefix::for_test(oversized_prefix.clone()).unwrap(),
+        );
+        assert!(matches!(
+            res.unwrap_err(),
+            ExtendedChannelError::ScriptSigSizeTooLarge
+        ));
+        assert_eq!(channel.get_extranonce_prefix(), &original_prefix[..]);
+
+        let res = channel.set_upstream_extranonce_prefix(&oversized_prefix);
         assert!(matches!(
             res.unwrap_err(),
             ExtendedChannelError::ScriptSigSizeTooLarge
@@ -2117,6 +2175,47 @@ mod tests {
             Err(ExtendedChannelError::ExtranoncePrefixTooLarge)
         ));
         assert_eq!(channel.get_extranonce_prefix(), &largest_valid_prefix);
+    }
+
+    #[test]
+    fn test_set_upstream_extranonce_prefix_preserves_allocation_transactionally() {
+        let mut allocator =
+            ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 5, 256).unwrap();
+        let allocated_prefix = allocator.allocate_extended(2).unwrap();
+        let old_suffix = allocated_prefix.as_bytes()[1..].to_vec();
+        let mut channel = ExtendedChannel::new(
+            1,
+            "user_identity".to_string(),
+            allocated_prefix.into(),
+            Target::from_le_bytes([0xff; 32]),
+            1.0,
+            true,
+            2,
+            100,
+            1.0,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        allocator.set_upstream_prefix(vec![0xcc, 0xdd]).unwrap();
+        channel
+            .set_upstream_extranonce_prefix(allocator.upstream_prefix())
+            .unwrap();
+        let mut expected = vec![0xcc, 0xdd];
+        expected.extend_from_slice(&old_suffix);
+        assert_eq!(channel.get_extranonce_prefix(), &expected);
+        assert_eq!(allocator.allocated_count(), 1);
+
+        let prefix_before_error = channel.get_extranonce_prefix().to_vec();
+        let result = channel.set_upstream_extranonce_prefix(&[0xee; 29]);
+        assert!(matches!(
+            result,
+            Err(ExtendedChannelError::ExtranoncePrefixTooLarge)
+        ));
+        assert_eq!(channel.get_extranonce_prefix(), &prefix_before_error);
+        assert_eq!(allocator.allocated_count(), 1);
     }
 
     #[test]
@@ -2284,9 +2383,17 @@ mod tests {
         assert_ne!(prefix_1.as_bytes(), prefix_2.as_bytes());
         assert_eq!(allocator.allocated_count(), 2);
 
+        let (mut channel, prefix_1_bytes, job_id) = extended_channel_with_live_job(prefix_1, false);
+        channel.set_extranonce_prefix(prefix_2).unwrap();
+        (allocator, channel, prefix_1_bytes, job_id)
+    }
+
+    fn extended_channel_with_live_job(
+        prefix_1: AllocatedExtranoncePrefix,
+        future: bool,
+    ) -> (ExtendedChannel, Vec<u8>, u32) {
         let prefix_1_bytes = prefix_1.as_bytes().to_vec();
-        let rollable_extranonce_size =
-            (total_extranonce_len as usize - prefix_1_bytes.len()) as u16;
+        let rollable_extranonce_size = (32 - prefix_1_bytes.len()) as u16;
 
         let mut channel = ExtendedChannel::new_for_pool(
             1,
@@ -2314,7 +2421,7 @@ mod tests {
 
         let template = NewTemplate {
             template_id: 1,
-            future_template: false,
+            future_template: future,
             version: 536870912,
             coinbase_tx_version: 2,
             coinbase_prefix: vec![82, 0].try_into().unwrap(),
@@ -2347,12 +2454,79 @@ mod tests {
         channel
             .on_new_template(template, coinbase_reward_outputs)
             .unwrap();
-        let job_id = channel.get_active_job().unwrap().get_job_id();
+        let job_id = if future {
+            channel.get_future_job_id_from_template_id(1).unwrap()
+        } else {
+            channel.get_active_job().unwrap().get_job_id()
+        };
 
-        // rotate the channel onto the second prefix, while the job above is still live
-        channel.set_extranonce_prefix(prefix_2).unwrap();
+        (channel, prefix_1_bytes, job_id)
+    }
 
-        (allocator, channel, prefix_1_bytes, job_id)
+    #[test]
+    fn test_mixed_prefix_updates_reserve_slot_until_jobs_go_stale() {
+        for future in [false, true] {
+            let mut allocator =
+                ExtranonceAllocator::from_upstream_prefix(vec![0xaa], vec![0xbb], 32, 2).unwrap();
+            let prefix = allocator.allocate_extended(8).unwrap();
+            let (mut channel, old_bytes, job_id) = extended_channel_with_live_job(prefix, future);
+
+            allocator.set_upstream_prefix(vec![0xcc]).unwrap();
+            channel.set_upstream_extranonce_prefix(&[0xcc]).unwrap();
+            assert_eq!(allocator.allocated_count(), 1);
+            assert_eq!(&channel.get_extranonce_prefix()[1..], &old_bytes[1..]);
+
+            let replacement = allocator.allocate_extended(8).unwrap();
+            channel.set_extranonce_prefix(replacement).unwrap();
+            let job = if future {
+                channel.get_future_job(job_id).unwrap()
+            } else {
+                channel.get_active_job().unwrap()
+            };
+            assert_eq!(job.get_extranonce_prefix(), old_bytes);
+            assert_eq!(allocator.allocated_count(), 2);
+            allocator.set_upstream_prefix(vec![0xaa]).unwrap();
+            assert!(matches!(
+                allocator.allocate_extended(8),
+                Err(ExtranonceAllocatorError::CapacityExhausted)
+            ));
+
+            // Activating the future job must preserve its old prefix and allocation.
+            if future {
+                channel
+                    .on_set_new_prev_hash(SetNewPrevHash {
+                        template_id: 1,
+                        prev_hash: [2; 32].into(),
+                        header_timestamp: 1745596970,
+                        n_bits: 453040064,
+                        target: [0xff; 32].into(),
+                    })
+                    .unwrap();
+                assert_eq!(
+                    channel.get_active_job().unwrap().get_extranonce_prefix(),
+                    old_bytes
+                );
+                assert_eq!(allocator.allocated_count(), 2);
+            }
+
+            // A new tip with no matching future job retires the old work.
+            channel
+                .on_set_new_prev_hash(SetNewPrevHash {
+                    template_id: 999,
+                    prev_hash: [1; 32].into(),
+                    header_timestamp: 1745597510,
+                    n_bits: 453040064,
+                    target: [0xff; 32].into(),
+                })
+                .unwrap();
+            assert!(channel.get_active_job().is_none());
+            assert_eq!(allocator.allocated_count(), 1);
+            let reused = allocator.allocate_extended(8).unwrap();
+            assert_eq!(reused.as_bytes(), old_bytes);
+            drop(reused);
+            drop(channel);
+            assert_eq!(allocator.allocated_count(), 0);
+        }
     }
 
     #[test]
