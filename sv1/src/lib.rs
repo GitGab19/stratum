@@ -28,7 +28,9 @@
 //! Every response contains the following parts
 //! * message ID: same ID as in request, for pairing request-response together
 //! * result: any json-encoded result object (number, string, list, array, …)
-//! * error: null or list (error code, error message)
+//! * error: null or a three-element list (error code, error message, additional data). The third
+//!   element is null when no additional data is provided. For compatibility, deserialization also
+//!   accepts two-element lists with absent data and object-form errors.
 //!
 //! References:
 //! [https://docs.google.com/document/d/17zHy1SUlhgtCMbypO8cHgpWH73V5iUQKk_0rWvMqSNs/edit?hl=en_US#]
@@ -140,7 +142,7 @@ pub trait IsServer {
             }
             methods::Client2Server::ExtranonceSubscribe(subscribe) => {
                 self.handle_extranonce_subscribe(client_id)?;
-                Ok(Some(subscribe.respond(true)))
+                Ok(Some(subscribe.respond()))
             }
             methods::Client2Server::Submit(submit) => {
                 let has_valid_version_bits = match &submit.version_bits {
@@ -155,7 +157,11 @@ pub trait IsServer {
                 };
 
                 if !self.is_authorized(client_id, &submit.user_name)? {
-                    return Err(Error::InvalidSubmission.into());
+                    return Ok(Some(submit.respond(
+                        client_to_server::SubmitOutcome::Rejected(
+                            client_to_server::SubmitError::UnauthorizedWorker,
+                        ),
+                    )));
                 }
 
                 let outcome = if self.extranonce2_size(client_id)? != submit.extra_nonce2.len()
@@ -224,8 +230,17 @@ pub trait IsServer {
         request: &client_to_server::Authorize,
     ) -> Result<bool, Self::Error>;
 
-    /// When miner find the job which meets requested difficulty, it can submit share to the server.
-    /// Only [Submit](client_to_server::Submit) requests for authorized user names can be submitted.
+    /// Validates a share after the default request handler has checked its SV1 session fields.
+    ///
+    /// [`Self::handle_parsed_request`] calls this only when the worker is authorized, extranonce2
+    /// has the size returned by [`Self::extranonce2_size`], and the version bits match the negotiated
+    /// version-rolling mask (including whether version bits must be present).
+    ///
+    /// Unauthorized workers receive [`client_to_server::SubmitError::UnauthorizedWorker`] (24).
+    /// Invalid extranonce2 sizes or version bits receive [`client_to_server::SubmitError::Other`]
+    /// (20). These rejections bypass this method and return `Ok(Some(response))`, not a Rust error;
+    /// applications that log or count them should inspect the returned response's `error` field.
+    /// Errors returned by the session-state accessors are still propagated to the caller.
     fn handle_submit(
         &self,
         client_id: Option<usize>,
@@ -977,6 +992,32 @@ mod tests {
             .error
             .expect("invalid submit must include an error");
         assert_eq!(error.code, 20);
+    }
+
+    #[test]
+    fn unauthorized_submit_returns_code_24() {
+        let extranonce1 = Extranonce::try_from(hex_decode("08000002").unwrap()).unwrap();
+        let mut server = TestServer::new(extranonce1, 4);
+        let request = client_to_server::Submit {
+            user_name: "worker".to_string(),
+            job_id: "job".to_string(),
+            extra_nonce2: vec![0; 4].try_into().unwrap(),
+            time: HexU32Be(0),
+            nonce: HexU32Be(0),
+            version_bits: None,
+            id: 42,
+        };
+
+        let response = server
+            .handle_message(None, request.into())
+            .unwrap()
+            .expect("unauthorized mining.submit must receive a response");
+
+        assert_eq!(response.result, serde_json::Value::Null);
+        let error = response
+            .error
+            .expect("unauthorized mining.submit must include an error");
+        assert_eq!(error.code, 24);
     }
 
     #[test]

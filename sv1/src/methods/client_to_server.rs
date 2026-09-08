@@ -119,10 +119,10 @@ pub struct ExtranonceSubscribe {
 }
 
 impl ExtranonceSubscribe {
-    pub fn respond(self, is_ok: bool) -> Response {
+    pub fn respond(self) -> Response {
         Response {
             id: self.id,
-            result: serde_json::to_value(is_ok).expect("a boolean is always valid JSON"),
+            result: Value::Bool(true),
             error: None,
         }
     }
@@ -189,6 +189,8 @@ pub enum SubmitError {
     JobNotFound,
     DuplicateShare,
     LowDifficultyShare,
+    UnauthorizedWorker,
+    NotSubscribed,
 }
 
 impl SubmitError {
@@ -198,6 +200,8 @@ impl SubmitError {
             Self::JobNotFound => 21,
             Self::DuplicateShare => 22,
             Self::LowDifficultyShare => 23,
+            Self::UnauthorizedWorker => 24,
+            Self::NotSubscribed => 25,
         }
     }
 
@@ -207,6 +211,8 @@ impl SubmitError {
             Self::JobNotFound => "Job not found",
             Self::DuplicateShare => "Duplicate share",
             Self::LowDifficultyShare => "Low difficulty share",
+            Self::UnauthorizedWorker => "Unauthorized worker",
+            Self::NotSubscribed => "Not subscribed",
         }
     }
 }
@@ -406,6 +412,8 @@ fn submit_errors_use_standard_sv1_codes() {
     assert_eq!(SubmitError::JobNotFound.code(), 21);
     assert_eq!(SubmitError::DuplicateShare.code(), 22);
     assert_eq!(SubmitError::LowDifficultyShare.code(), 23);
+    assert_eq!(SubmitError::UnauthorizedWorker.code(), 24);
+    assert_eq!(SubmitError::NotSubscribed.code(), 25);
 }
 
 /// _mining.subscribe("user agent/version", "extranonce1")_
