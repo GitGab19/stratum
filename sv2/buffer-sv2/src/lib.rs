@@ -114,3 +114,5 @@ pub trait Buffer {
         self.len() == 0
     }
 }
+
+// rehearsal: a change without a version bump
